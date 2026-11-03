@@ -12,7 +12,19 @@ from .scorer import JUDGE_PROMPT_VERSION
 from .store import JsonlStore
 
 
+def _unique(values):
+    result = []
+    seen = set()
+    for value in values:
+        key = str(value).lower()
+        if key not in seen:
+            seen.add(key)
+            result.append(value)
+    return result
+
+
 def format_label_help(labels, label_help):
+    labels = _unique(labels)
     if isinstance(label_help, dict):
         return "\n".join("%s: %s" % (label, label_help.get(label, "")) for label in labels)
     if isinstance(label_help, str) and label_help.strip():
@@ -66,7 +78,7 @@ class Judge:
             allowed = ["1", "2"]
             instruction = "Return the chosen OPTION TOKEN only: 1, 2, hedge, refused, or unscorable."
         else:
-            allowed = list(labels) + ["hedge", "refused", "unscorable"]
+            allowed = _unique(list(labels) + ["hedge", "refused", "unscorable"])
             instruction = "Use 'hedge' if the answer offers several possibilities without committing, 'refused' if it declines, and 'unscorable' if it gives no answer. Reply with JSON only: {\"label\": \"...\"}."
         help_text = format_label_help(labels, label_help)
         return ("You are labelling a single answer. Allowed labels or option tokens: %s\nLabel descriptions:\n%s\n%s "

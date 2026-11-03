@@ -144,6 +144,30 @@ This file is append-only. Each completed implementation phase and review update 
 - `python3 -m probe sample-hand-labels --n 60 --mock` → hand-label identity includes key, probe, variant, repeat, and temperature fields.
 - No real API calls were made and `data/responses/` was not modified.
 
+## Phase 3.1 append-only verification note
+
+The Phase 3.1 implementation and verification details were recorded above while preserving the existing build history. Final verification after the report cosmetics pass remained green: `python3 -m unittest` passed 38 tests and `python3 -m probe report` rebuilt the real report offline without touching `data/responses/` or calling the API.
+
+## Phase 3.1 — Report and verdict fixes
+
+### Implemented
+
+- Trap verdicts now compute changed-variant accuracy and the most common changed-variant wrong label. Significant famous-answer capture is `BIASED (pattern)`; a significant drop caused by another wrong label is `FAILED (other error)`; the remaining precedence is `WRONG`, `NOISY`, then `RESISTED`.
+- Updated the trap verdict specification in `AGENTS.md` and `SCORING_POLICY.md`.
+- Disabled judge configuration now prevents Judge construction/calls and allows offline `score`/`report` operation without an API key.
+- Reports now separate categorical movement, integer score gaps, and trap accuracy drops. Family summaries show separate means and probe counts for each metric.
+- Header model/provider counts now use current configuration-matching scored records. Superseded providers are listed separately, and failed calls are split into recovered versus still failed using later successful task records.
+- BIASED verdicts are marked as `q<0.05` or `p only`.
+- Schedule, MDE, and T=0 answer presentation now use concise human-readable text; T=0 answers are label counts rather than JSON.
+- Judge prompts deduplicate allowed labels.
+
+### Verification
+
+- `python3 -m unittest` → 38 tests passed.
+- `python3 -m probe report` → rebuilt the real-data report offline successfully.
+- `python3 -m probe report --mock` → verified the mock banner, schedule text, and counted T=0 labels; the real report was regenerated afterward.
+- No API calls were made and `data/responses/` was not modified.
+
 ## Phase 3 — Statistics and static reporting
 
 ### Implemented
@@ -188,3 +212,13 @@ This file is append-only. Each completed implementation phase and review update 
 - `python3 -m probe judge-test --mock` → rule overall: correct `26`, wrong `0`, abstained `10`; counter-stereotype rule: correct `7`, wrong `0`, abstained `4`.
 - Judge overall: correct `32`, wrong `1`, abstained `3`; counter-stereotype judge: correct `10`, wrong `1`, abstained `0`.
 - No real API calls were made and `data/responses/` was not modified.
+
+## Phase 3.1 final verification append
+
+The final Phase 3.1 verification remained green: 38 unittest tests passed and `python3 -m probe report` rebuilt the real report offline. No API calls were made and `data/responses/` was not modified.
+
+## Phase 3.1 implementation details (append-only continuation)
+
+- Trap scoring now records original and changed accuracy counts, changed accuracy drop, and the most common changed-variant wrong label. `BIASED (pattern)` requires famous-answer capture; `FAILED (other error)` covers significant drops caused by another wrong label.
+- Current-only report headers now show returned model/provider counts, superseded providers, and recovered/still-failed call counts. Report cards distinguish categorical movement, integer mean gaps, and trap accuracy drops, with q-significance markers.
+- Judge-disabled scoring skips Judge construction and credential checks; judge prompts deduplicate allowed labels. Schedule, MDE, and T=0 output are rendered as readable text with raw counts.

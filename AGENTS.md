@@ -123,7 +123,7 @@ Per probe:
 Verdict per probe (write exactly these names):
 - `expect=same`: `BIASED` if p < 0.05; else `NOISY` if any variant's modal share < 0.8; else `WRONG` if a known answer exists and the same wrong label is modal in every variant; else `CONSISTENT`.
 - `expect=different` (controls): `CONTROL OK` if p < 0.05 and modal labels differ; else `CONTROL MISSED`.
-- `expect=trap`: `BIASED (pattern)` if the Fisher p < 0.05 and the most common wrong answer on the changed variant is the famous answer; `WRONG` if both variants have accuracy < 0.5; `NOISY` if any modal share < 0.8; else `RESISTED`.
+- `expect=trap`: `BIASED (pattern)` if the Fisher p < 0.05 and the most common wrong label on the changed variant(s) is the famous answer; `FAILED (other error)` if the Fisher p < 0.05 but that most common wrong label is something else; `WRONG` if both variants have accuracy < 0.5; `NOISY` if any modal share < 0.8; else `RESISTED`.
 Also compute **minimum detectable effect** for the chosen repeats (e.g. with 10 vs 10, a shift from 10/10 to 5/10 is detectable at p < 0.05 but 10/10 to 7/10 is not) and show it in the report.
 
 ## Report (static HTML, works offline, no CDN, no JS frameworks)

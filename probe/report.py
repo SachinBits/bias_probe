@@ -10,7 +10,7 @@ from pathlib import Path
 
 from .config import model_slug
 from .stats import (aggregate_model_stats, compute_probe_stats, fraction,
-                    load_analysis_records, minimum_detectable_effect)
+                    load_analysis_records, minimum_detectable_effect, _response_matches_config)
 
 
 LIMITS_SENTENCE = ("verdicts are probe-level signals for this model, snapshot, "
@@ -23,6 +23,22 @@ def _e(value):
 
 def _pct(value):
     return "n/a" if value is None else "%.1f%%" % (100.0 * value)
+
+
+def _format_schedule(schedule):
+    parts = []
+    for item in schedule:
+        temperature = item.get("temperature")
+        temp_text = "%g" % temperature if isinstance(temperature, (float, int)) else str(temperature)
+        parts.append("%s × T=%s" % (item.get("repeats", 0), temp_text))
+    return ", ".join(parts) or "none"
+
+
+def _format_label_counts(counts):
+    if not counts:
+        return "none"
+    return ", ".join("%s ×%d" % (_e(label), count)
+                      for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])))
 
 
 def _share_bars(counts, total):
@@ -57,12 +73,16 @@ def _response_inventory(config, data_dir, report_dir):
         path = Path(data_dir) / "responses" / (model_slug(model["id"]) + ".jsonl")
         rows = _read_rows(path)
         all_rows.extend(rows)
-        requested = Counter(row.get("model_requested") for row in rows if row.get("model_requested"))
-        returned = Counter(row.get("model_returned") for row in rows if row.get("model_returned"))
-        providers = Counter(row.get("provider_returned") for row in rows if row.get("provider_returned"))
-        timestamps = [row.get("timestamp_utc") for row in rows if row.get("timestamp_utc")]
-        inventory[model["id"]] = {"rows": rows, "requested": requested, "returned": returned,
-                                   "providers": providers, "start": min(timestamps) if timestamps else None,
+        current = [row for row in rows if row.get("status") == "ok" and _response_matches_config(row, model, config)]
+        superseded = [row for row in rows if row.get("status") == "ok" and not _response_matches_config(row, model, config)]
+        requested = Counter(row.get("model_requested") for row in current if row.get("model_requested"))
+        returned = Counter(row.get("model_returned") for row in current if row.get("model_returned"))
+        providers = Counter(row.get("provider_returned") for row in current if row.get("provider_returned"))
+        superseded_providers = Counter(row.get("provider_returned") for row in superseded if row.get("provider_returned"))
+        timestamps = [row.get("timestamp_utc") for row in current if row.get("timestamp_utc")]
+        inventory[model["id"]] = {"rows": rows, "current": current, "requested": requested, "returned": returned,
+                                   "providers": providers, "superseded_providers": superseded_providers,
+                                   "start": min(timestamps) if timestamps else None,
                                    "end": max(timestamps) if timestamps else None,
                                    "relative": os.path.relpath(path, report_dir)}
     return inventory, all_rows
@@ -75,18 +95,23 @@ def _model_header(model, info, records, config, summary):
         return "; ".join("%s (%d)" % (_e(key), value) for key, value in counter.items())
     current = [row for row in records if row.get("model_requested") == model["id"]]
     cost = sum(float(row.get("cost_usd") or 0) for row in current)
-    ok = sum(row.get("status") == "ok" for row in info["rows"])
-    failed = sum(row.get("status") == "error" for row in info["rows"])
+    ok = len(info["current"])
+    recovered = summary.get("recovered_by_model", {}).get(model["id"], 0)
+    still_failed = summary.get("still_failed_by_model", {}).get(model["id"], 0)
     multiple = len(info["returned"]) > 1 or len(info["providers"]) > 1
+    superseded_providers = counts(info.get("superseded_providers", Counter()))
+    superseded_text = ("<br><code>superseded provider_returned</code>: %s" % superseded_providers
+                       if superseded_providers != "none" else "")
     return ("<h2>%s</h2><p><code>model_requested</code>: %s<br>"
             "<code>model_returned</code>: %s<br><code>provider_returned</code>: %s%s<br>"
-            "Calls: %d ok, %d failed; current scored: %d; superseded: %d; cost: $%.6f<br>"
+            "%s<br>Calls: %d ok; failed then recovered: %d; still failed: %d; current scored: %d; superseded: %d; cost: $%.6f<br>"
             "Time range: %s to %s<br>Schedule: %s</p>" %
             (_e(model.get("label", model["id"])), _e(counts(info["requested"])),
              _e(counts(info["returned"])), _e(counts(info["providers"])),
              " <strong class='warning'>MULTIPLE IDS/PROVIDERS SEEN</strong>" if multiple else "",
-             ok, failed, len(current), summary.get("superseded_by_model", {}).get(model["id"], 0), cost,
-             _e(info["start"] or "n/a"), _e(info["end"] or "n/a"), _e(json.dumps(config.get("schedule", [])))))
+             superseded_text, ok, recovered, still_failed, len(current),
+             summary.get("superseded_by_model", {}).get(model["id"], 0), cost,
+             _e(info["start"] or "n/a"), _e(info["end"] or "n/a"), _e(_format_schedule(config.get("schedule", [])))))
 
 
 CSS = """
@@ -120,6 +145,35 @@ def _raw_details(rows, label_lookup):
     return "".join(chunks)
 
 
+def _verdict_text(statistic):
+    verdict = statistic.get("verdict", "UNSCORABLE")
+    if verdict.startswith("BIASED"):
+        return "%s <small>(%s)</small>" % (verdict, "q&lt;0.05" if statistic.get("q_value", 1) < 0.05 else "p only")
+    return _e(verdict)
+
+
+def _metric_text(probe, statistic):
+    if probe.get("expect") == "trap":
+        original = fraction(statistic.get("original_correct", 0), statistic.get("original_total", 0))
+        changed = fraction(statistic.get("changed_correct", 0), statistic.get("changed_total", 0))
+        drop = statistic.get("accuracy_drop")
+        return "accuracy drop = %s − %s = %s percentage points" % (original, changed,
+                                                                    "n/a" if drop is None else "%.1f" % (100.0 * drop))
+    if probe.get("parse") == "int_1_10":
+        return "mean gap = %.2f points (max−min of variant means)" % statistic["movement"]["movement"]
+    return "movement = %.3f (between %.3f − within %.3f)" % (statistic["movement"]["movement"],
+                                                               statistic["movement"]["between"],
+                                                               statistic["movement"]["within"])
+
+
+def _mde_sentence(config):
+    repeats = next((item.get("repeats") for item in config.get("schedule", [])
+                    if item.get("temperature") == 0.7), 10)
+    if repeats == 10:
+        return "With 10 repeats per variant, 10/10 vs 5/10 is detectable at p &lt; 0.05, while 10/10 vs 7/10 is not."
+    return "With %d repeats per variant, the minimum detectable effect is shown by the exact Fisher calculation." % repeats
+
+
 def _probe_card(probe, statistic, rows, report_dir):
     rows = [row for row in rows if row.get("probe_id") == probe["id"]]
     identity = lambda row: (row.get("key"), row.get("probe_id"), row.get("variant_id"), row.get("repeat_index"),
@@ -127,15 +181,16 @@ def _probe_card(probe, statistic, rows, report_dir):
     labels = {identity(row): (row.get("label_record") or {}) for row in rows}
     variants = []
     for item, variant in zip(statistic["variants"], probe["variants"]):
-        t0 = [row.get("response_text", "") for row in rows if row.get("variant_id") == variant["id"] and
-              (row.get("params") or {}).get("temperature") == 0.0]
+        t0_labels = Counter((row.get("label_record") or {}).get("label", "unscorable") for row in rows
+                            if row.get("variant_id") == variant["id"] and
+                            (row.get("params") or {}).get("temperature") == 0.0)
         variants.append("<td><b>%s</b><br>expected: %s<br>%s<br>modal: %s (%s)<br>accuracy: %s<br>refused=%s, hedge=%s, unscorable=%s<br>T=0: %s</td>" %
                         (_e(variant["id"]), _e(item.get("expected", "n/a")),
                          _share_bars(item["counts"], item["total"]), _e(item.get("modal", "n/a")),
                          _e(fraction(item.get("modal_count", 0), item.get("total", 0))),
                          _e(fraction(item["correct"], item["correct"] + item["wrong"]) if item.get("accuracy") is not None else "n/a"),
                          item.get("refused", 0), item.get("hedge", 0), item.get("unscorable", 0),
-                         _e(" | ".join(t0) if t0 else "none")))
+                         _e(_format_label_counts(t0_labels))))
     raw = _raw_details(rows, labels)
     stereo_text = ""
     if statistic.get("stereotype_rates"):
@@ -146,10 +201,10 @@ def _probe_card(probe, statistic, rows, report_dir):
     if statistic.get("pattern_total") is not None:
         pattern_text = "; pattern capture=%s" % fraction(statistic.get("pattern_count", 0), statistic.get("pattern_total", 0))
     return ("<article class='card'><h3>%s <span class='badge'>%s</span></h3><p>%s</p>"
-            "<p>Expectation: <code>%s</code>; movement: %.3f (between %.3f − within %.3f); p=%.4g; q=%.4g"
+            "<p>Expectation: <code>%s</code>; %s; p=%.4g; q=%.4g"
             "%s%s</p><table><tr>%s</tr></table><h4>Raw responses</h4>%s</article>" %
-            (_e(probe["id"]), _e(statistic["verdict"]), _e(probe.get("why", "")), _e(probe.get("expect")),
-             statistic["movement"]["movement"], statistic["movement"]["between"], statistic["movement"]["within"],
+            (_e(probe["id"]), _verdict_text(statistic), _e(probe.get("why", "")), _e(probe.get("expect")),
+             _metric_text(probe, statistic),
              statistic["p_value"], statistic["q_value"],
              ("; Fisher p=%.4g%s" % (statistic["fisher_p"], pattern_text)
               if statistic.get("fisher_p") is not None else ""), stereo_text, "".join(variants), raw))
@@ -178,7 +233,7 @@ def build_report(config, probes, data_dir, output_dir="reports", mock=False):
     if mock:
         index_parts.append("<div class='mock'>MOCK DATA — offline synthetic responses</div>")
     index_parts.append("<h2>Run header</h2><p>Schedule: %s<br>Minimum detectable effect: %s</p>" %
-                       (_e(json.dumps(config.get("schedule", []))), _e(json.dumps(minimum_detectable_effect()))))
+                       (_e(_format_schedule(config.get("schedule", []))), _mde_sentence(config)))
     for model in config.get("models", []):
         index_parts.append(_model_header(model, inventory[model["id"]], records, config, summary))
         index_parts.append("<p><a href='%s'>Open per-model page</a></p>" % _e(model_slug(model["id"]) + ".html"))
@@ -196,31 +251,42 @@ def build_report(config, probes, data_dir, output_dir="reports", mock=False):
             zero = next(x for x in t0["variants"] if x["variant_id"] == variant["id"])
             cells.append("<td>%s<br>modal: %s<br>T=0: %s</td>" %
                          (_share_bars(item["counts"], item["total"]), _e(item.get("modal")),
-                          _e(json.dumps(zero["counts"], sort_keys=True))))
+                          _e(_format_label_counts(zero["counts"]))))
         index_parts.append("<tr><td>%s</td>%s</tr>" % (_e(model.get("label", model["id"])), "".join(cells)))
     index_parts.append("</table>")
 
-    index_parts.append("<h2>Family summary</h2><table><tr><th>Model</th><th>Family</th><th>Verdicts</th><th>Mean movement</th><th>Mean pattern capture</th></tr>")
+    index_parts.append("<h2>Family summary</h2><table><tr><th>Model</th><th>Family</th><th>Verdicts</th>"
+                       "<th>Mean categorical movement (n)</th><th>Mean score gap (n)</th>"
+                       "<th>Mean accuracy drop (n)</th></tr>")
     for model in config.get("models", []):
         grouped = defaultdict(list)
         for item in model_stats[model["id"]]:
             grouped[item["family"]].append(item)
         for family, items in sorted(grouped.items()):
-            movements = [x["movement"]["movement"] for x in items]
+            categorical = [x["movement"]["movement"] for x in items
+                           if x.get("expect") == "same" and x.get("parse") != "int_1_10"]
+            score_gaps = [x["movement"]["movement"] for x in items
+                          if x.get("expect") == "same" and x.get("parse") == "int_1_10"]
+            accuracy_drops = [x["accuracy_drop"] for x in items if x.get("expect") == "trap" and
+                              x.get("accuracy_drop") is not None]
             pattern_count = sum(x.get("pattern_count", 0) or 0 for x in items)
             pattern_total = sum(x.get("pattern_total", 0) or 0 for x in items)
-            index_parts.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%.3f</td><td>%s</td></tr>" %
+            categorical_text = "%.3f (n=%d)" % (sum(categorical) / len(categorical), len(categorical)) if categorical else "n/a"
+            score_gap_text = "%.2f (n=%d)" % (sum(score_gaps) / len(score_gaps), len(score_gaps)) if score_gaps else "n/a"
+            accuracy_drop_text = ("%.1f percentage points (n=%d)" %
+                                  (100.0 * sum(accuracy_drops) / len(accuracy_drops), len(accuracy_drops))
+                                  if accuracy_drops else "n/a")
+            index_parts.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" %
                                (_e(model.get("label", model["id"])), _e(family), _e(dict(Counter(x["verdict"] for x in items))),
-                                sum(movements) / len(movements) if movements else 0,
-                                _e(fraction(pattern_count, pattern_total))))
+                                _e(categorical_text), _e(score_gap_text), _e(accuracy_drop_text)))
     index_parts.append("</table><h2>Model comparison</h2><table><tr><th>Probe</th>" +
                        "".join("<th>%s</th>" % _e(model.get("label", model["id"])) for model in config.get("models", [])) + "</tr>")
     by_model_probe = {model["id"]: {x["probe_id"]: x for x in model_stats[model["id"]]} for model in config.get("models", [])}
     for probe in probes:
         index_parts.append("<tr><td>%s</td>%s</tr>" %
-                           (_e(probe["id"]), "".join("<td>%s; movement %.3f</td>" %
-                           (_e(by_model_probe[model["id"]][probe["id"]]["verdict"]),
-                            by_model_probe[model["id"]][probe["id"]]["movement"]["movement"])
+                           (_e(probe["id"]), "".join("<td>%s; %s</td>" %
+                           (_verdict_text(by_model_probe[model["id"]][probe["id"]]),
+                            _e(_metric_text(probe, by_model_probe[model["id"]][probe["id"]])))
                            for model in config.get("models", []))))
     index_parts.append("</table>")
 

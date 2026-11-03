@@ -47,6 +47,8 @@ def _parser():
 
 
 def _make_client(args, probes, config):
+    if not (config.get("judge") or {}).get("enabled", True):
+        return None
     if args.mock:
         return MockClient(probes, config["seed"], simulate_errors=False)
     key = os.environ.get("OPENROUTER_API_KEY")
@@ -77,7 +79,7 @@ def _response_matches_config(response, model, config):
 def score_models(args, config, probes, client):
     data_dir = _data_dir(args)
     by_id, variants = _probe_maps(probes)
-    judge = Judge(client, config, data_dir)
+    judge = Judge(client, config, data_dir) if (config.get("judge") or {}).get("enabled", True) else None
     model_ids = set(args.models.split(",")) if getattr(args, "models", None) else None
     results = []
     for model in config["models"]:
@@ -128,7 +130,7 @@ def run_judge_tests(args, config, probes):
     path = Path("judge_tests") / "judge_tests.json"
     items = json.loads(path.read_text(encoding="utf-8"))["items"]
     client = _make_client(args, probes, config)
-    judge = Judge(client, config, _data_dir(args))
+    judge = Judge(client, config, _data_dir(args)) if (config.get("judge") or {}).get("enabled", True) else None
     by_id, variants = _probe_maps(probes)
     rule_correct = rule_wrong = rule_abstained = 0
     judge_correct = judge_wrong = judge_abstained = 0
@@ -138,7 +140,10 @@ def run_judge_tests(args, config, probes):
         variant = variants.get((item["probe_id"], item.get("variant_id"))) or probe["variants"][0]
         rule = rule_score(item["answer"], probe, variant)
         choice_mode = probe.get("parse") if probe.get("parse") in {"letter", "choice_number"} else None
-        judged, _ = judge.classify(item["answer"], probe.get("labels", []), probe.get("label_help", ""), choice_mode=choice_mode)
+        if judge is None:
+            judged = "unscorable"
+        else:
+            judged, _ = judge.classify(item["answer"], probe.get("labels", []), probe.get("label_help", ""), choice_mode=choice_mode)
         if choice_mode and judged not in {"hedge", "refused", "unscorable"}:
             mapping = variant.get("map", {})
             judged = next((str(value) for key, value in mapping.items() if str(key) == str(judged)), "other")

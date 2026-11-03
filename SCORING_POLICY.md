@@ -11,3 +11,8 @@ Accuracy excludes refusals, hedges, and unscorable answers. Statistics use only
 successful response records matching the current model, provider, temperature,
 and max-token configuration. Superseded records remain visible in the report
 but do not affect its metrics.
+
+For trap probes, a significant accuracy drop is labelled `BIASED (pattern)`
+only when the most common changed-variant error is the original variant's
+famous answer. A significant drop caused by a different wrong label is
+`FAILED (other error)`.

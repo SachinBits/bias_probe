@@ -173,7 +173,7 @@ def _scorable(label):
 
 
 def verdict(probe, variant_stats, movement_stats=None, p_value=1.0, fisher_p=None,
-            pattern_capture=None):
+            pattern_capture=None, changed_wrong_label=None):
     """Return one of the exact verdict strings in AGENTS.md."""
     expect = probe.get("expect")
     modals = [item.get("modal") for item in variant_stats if item.get("modal") is not None]
@@ -183,8 +183,11 @@ def verdict(probe, variant_stats, movement_stats=None, p_value=1.0, fisher_p=Non
     if expect == "different":
         return "CONTROL OK" if p_value < 0.05 and modal_differs else "CONTROL MISSED"
     if expect == "trap":
-        if fisher_p is not None and fisher_p < 0.05 and pattern_capture is not None and pattern_capture > 0:
-            return "BIASED (pattern)"
+        if fisher_p is not None and fisher_p < 0.05:
+            famous = variant_stats[0].get("expected") if variant_stats else None
+            if changed_wrong_label is not None and str(changed_wrong_label) == str(famous):
+                return "BIASED (pattern)"
+            return "FAILED (other error)"
         accuracies = [item.get("accuracy") for item in variant_stats if item.get("accuracy") is not None]
         if len(accuracies) >= 2 and all(value < 0.5 for value in accuracies):
             return "WRONG"
@@ -250,15 +253,27 @@ def load_analysis_records(config, probes, data_dir):
     by_id = {probe["id"]: probe for probe in probes}
     records, superseded, failed = [], 0, 0
     superseded_by_model, failed_by_model = defaultdict(int), defaultdict(int)
+    recovered_by_model, still_failed_by_model = defaultdict(int), defaultdict(int)
     for model in config.get("models", []):
         response_path = data_dir / "responses" / (model_slug(model["id"]) + ".jsonl")
         label_path = data_dir / "labels" / (model_slug(model["id"]) + ".jsonl")
         labels = {response_identity(row): row for row in _read_jsonl(label_path)}
-        for raw in _read_jsonl(response_path):
+        raw_rows = _read_jsonl(response_path)
+        ok_lines = {}
+        for candidate in raw_rows:
+            if candidate.get("status") == "ok":
+                task = (candidate.get("key"), candidate.get("probe_id"), candidate.get("variant_id"))
+                ok_lines.setdefault(task, []).append(candidate.get("_line", 0))
+        for raw in raw_rows:
             if raw.get("status") != "ok":
                 if _response_matches_config(raw, model, config):
                     failed += 1
                     failed_by_model[model["id"]] += 1
+                    task = (raw.get("key"), raw.get("probe_id"), raw.get("variant_id"))
+                    if any(line > raw.get("_line", 0) for line in ok_lines.get(task, [])):
+                        recovered_by_model[model["id"]] += 1
+                    else:
+                        still_failed_by_model[model["id"]] += 1
                 continue
             if not _response_matches_config(raw, model, config):
                 superseded += 1
@@ -274,7 +289,9 @@ def load_analysis_records(config, probes, data_dir):
             records.append(row)
     return records, {"superseded": superseded, "failed": failed,
                      "superseded_by_model": dict(superseded_by_model),
-                     "failed_by_model": dict(failed_by_model)}
+                     "failed_by_model": dict(failed_by_model),
+                     "recovered_by_model": dict(recovered_by_model),
+                     "still_failed_by_model": dict(still_failed_by_model)}
 
 
 def compute_probe_stats(records, probe, temperature=0.7, permutations=5000, seed=12345):
@@ -295,6 +312,8 @@ def compute_probe_stats(records, probe, temperature=0.7, permutations=5000, seed
     p_value = permutation_pvalue(ordered, permutations, seed, numeric=numeric)
     fisher = pattern = None
     pattern_count = pattern_total = None
+    original_correct = original_total = changed_correct = changed_total = None
+    changed_wrong_label = None
     if probe.get("expect") == "trap" and len(ordered) >= 2:
         first_expected = _expected(probe, probe["variants"][0])
         original = ordered[0]
@@ -307,6 +326,13 @@ def compute_probe_stats(records, probe, temperature=0.7, permutations=5000, seed
         fisher = fisher_exact_one_sided(original_correct, original_total, changed_correct, changed_total)
         pattern_count, pattern_total = sum(_scorable(x) and str(x) == str(first_expected) for x in changed), changed_total
         pattern = pattern_count / pattern_total if pattern_total else None
+        wrong_labels = []
+        for label in changed:
+            if not _scorable(label):
+                continue
+            if not any(str(label) == str(_expected(probe, variant)) for variant in probe["variants"][1:]):
+                wrong_labels.append(str(label))
+        changed_wrong_label = Counter(wrong_labels).most_common(1)[0][0] if wrong_labels else None
     stereotype_rates = {}
     if probe.get("family") == "social" and probe.get("stereotype"):
         for variant in probe["variants"]:
@@ -315,12 +341,23 @@ def compute_probe_stats(records, probe, temperature=0.7, permutations=5000, seed
             count = sum(str(x) == str(target) for x in labels)
             stereotype_rates[variant["id"]] = {"label": target, "count": count, "total": len(labels),
                                                 "rate": count / len(labels) if labels else None}
+    accuracy_drop = None
+    if original_total and changed_total:
+        accuracy_drop = original_correct / original_total - changed_correct / changed_total
     return {"probe_id": probe["id"], "family": probe["family"], "expect": probe["expect"],
+            "parse": probe.get("parse"),
             "temperature": temperature, "n": len(selected), "variants": variant_results,
             "movement": movement_stats, "p_value": p_value, "q_value": None,
             "fisher_p": fisher, "pattern_capture": pattern, "pattern_count": pattern_count,
-            "pattern_total": pattern_total, "stereotype_rates": stereotype_rates,
-            "verdict": verdict(probe, variant_results, movement_stats, p_value, fisher, pattern),
+            "pattern_total": pattern_total, "changed_wrong_label": changed_wrong_label,
+            "most_common_wrong_label": changed_wrong_label,
+            "original_correct": original_correct, "original_total": original_total,
+            "changed_correct": changed_correct, "changed_total": changed_total,
+            "original_accuracy": original_correct / original_total if original_total else None,
+            "changed_accuracy": changed_correct / changed_total if changed_total else None,
+            "accuracy_drop": accuracy_drop, "stereotype_rates": stereotype_rates,
+            "verdict": verdict(probe, variant_results, movement_stats, p_value, fisher, pattern,
+                                changed_wrong_label),
             "records": selected}
 
 
