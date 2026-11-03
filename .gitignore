@@ -2,5 +2,3 @@
 __pycache__/
 *.py[cod]
 data_mock/
-data/
-reports/*.html

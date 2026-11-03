@@ -1,7 +1,7 @@
 """Run probe tasks with retries, resume, concurrency and spend cap."""
 from __future__ import annotations
 
-import datetime
+from datetime import datetime, timezone
 import random
 import time
 import uuid
@@ -12,7 +12,7 @@ from .store import JsonlStore, cache_key
 
 
 def _now():
-    return datetime.datetime.utcnow().replace(microsecond=0).isoformat() + "Z"
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 
 def build_tasks(models, probes, schedule, max_tokens):
@@ -31,7 +31,9 @@ def _call(task, client, store, run_id, provider, seed, max_attempts=6):
     key = cache_key(task["model"], provider, variant["prompt"], task["temperature"], task["max_tokens"], task["repeat_index"])
     last_error = ""
     started = time.time()
+    attempts_made = 0
     for attempt in range(1, max_attempts + 1):
+        attempts_made = attempt
         try:
             result = client.complete(task["model"], variant["prompt"], task["temperature"], task["max_tokens"], provider, seed, task["repeat_index"])
             return {"schema_version": 1, "key": key, "run_id": run_id, "timestamp_utc": _now(),
@@ -49,13 +51,16 @@ def _call(task, client, store, run_id, provider, seed, max_attempts=6):
                 break
             delay = float(exc.retry_after) if exc.retry_after else min(32, 2 ** (attempt - 1))
             time.sleep(delay * (0.75 + random.random() * 0.5))
+        except Exception as exc:
+            last_error = "Unexpected %s: %s" % (type(exc).__name__, exc)
+            break
     return {"schema_version": 1, "key": key, "run_id": run_id, "timestamp_utc": _now(),
             "model_requested": task["model"], "model_returned": None, "provider_returned": None,
             "response_id": None, "probe_id": probe["id"], "family": probe["family"], "variant_id": variant["id"],
             "repeat_index": task["repeat_index"], "params": {"temperature": task["temperature"], "max_tokens": task["max_tokens"], "provider": provider},
             "prompt": variant["prompt"], "response_text": "", "finish_reason": None, "usage": {}, "cost_usd": 0.0,
             "latency_ms": int((time.time() - started) * 1000), "status": "error", "error": last_error,
-            "attempts": max_attempts, "mock": isinstance(getattr(client, "__class__", None), type) and client.__class__.__name__ == "MockClient"}
+            "attempts": attempts_made, "mock": isinstance(getattr(client, "__class__", None), type) and client.__class__.__name__ == "MockClient"}
 
 
 def run(config, probes, client, data_dir, model_ids=None, probe_ids=None, dry_run=False):

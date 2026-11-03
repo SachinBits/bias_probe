@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import sys
 import threading
 from pathlib import Path
 
@@ -15,6 +16,8 @@ def cache_key(model, provider, prompt, temperature, max_tokens, repeat_index):
 
 
 class JsonlStore:
+    _warned_paths = set()
+
     def __init__(self, path):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -25,9 +28,15 @@ class JsonlStore:
             return []
         result = []
         with self.path.open(encoding="utf-8") as f:
-            for line in f:
+            for line_number, line in enumerate(f, 1):
                 if line.strip():
-                    result.append(json.loads(line))
+                    try:
+                        result.append(json.loads(line))
+                    except (TypeError, ValueError):
+                        path_key = str(self.path.resolve())
+                        if path_key not in self._warned_paths:
+                            print("Warning: skipping unparseable JSONL line %d in %s" % (line_number, self.path), file=sys.stderr)
+                            self._warned_paths.add(path_key)
         return result
 
     def ok_keys(self):

@@ -31,7 +31,7 @@ def main(argv=None):
     model_ids = set(args.models.split(",")) if args.models else None
     probe_ids = set(args.probes.split(",")) if args.probes else None
     if args.command == "ping":
-        client = MockClient(config["seed"]) if args.mock else OpenRouterClient(os.environ.get("OPENROUTER_API_KEY", ""))
+        client = MockClient(probes, config["seed"]) if args.mock else OpenRouterClient(os.environ.get("OPENROUTER_API_KEY", ""))
         if not args.mock and not client.api_key:
             raise SystemExit("OPENROUTER_API_KEY is required (use --mock for offline testing)")
         for model in config["models"]:
@@ -42,9 +42,16 @@ def main(argv=None):
                 print("%s -> model_returned=%s provider=%s" % (model["id"], result.get("model_returned"), result.get("provider_returned")))
             except Exception as exc:
                 print("%s -> ERROR: %s" % (model["id"], exc))
+        judge = config.get("judge") or {}
+        if judge.get("id"):
+            try:
+                result = client.complete(judge["id"], "Reply with OK.", judge.get("temperature", 0), judge.get("max_tokens", 80), None, config["seed"], 0)
+                print("judge %s -> model_returned=%s provider=%s" % (judge["id"], result.get("model_returned"), result.get("provider_returned")))
+            except Exception as exc:
+                print("judge %s -> ERROR: %s" % (judge["id"], exc))
         return
     data_dir = Path(args.data_dir or ("data_mock" if args.mock else "data"))
     if not args.mock and not os.environ.get("OPENROUTER_API_KEY"):
         raise SystemExit("OPENROUTER_API_KEY is required (use --mock for offline testing)")
-    client = MockClient(config["seed"]) if args.mock else OpenRouterClient(os.environ["OPENROUTER_API_KEY"])
+    client = MockClient(probes, config["seed"]) if args.mock else OpenRouterClient(os.environ["OPENROUTER_API_KEY"])
     run(config, probes, client, data_dir, model_ids, probe_ids, args.dry_run)

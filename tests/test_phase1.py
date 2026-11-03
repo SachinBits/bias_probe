@@ -1,20 +1,28 @@
 import json
+import io
 import tempfile
 import unittest
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
+import urllib.error
 
 from probe.bank import BankError, load_probe_files
-from probe.client import ClientError, MockClient
+from probe.client import ClientError, MockClient, OpenRouterClient
+from probe.cli import main
 from probe.runner import run
-from probe.store import cache_key
+from probe.store import JsonlStore, cache_key
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class Phase1Tests(unittest.TestCase):
+    def loaded_probes(self):
+        return load_probe_files([str(ROOT / "probes" / "bank.json"), str(ROOT / "probes" / "custom.json")])
+
     def test_bank_and_stereotype_normalisation(self):
-        probes = load_probe_files([str(ROOT / "probes" / "bank.json"), str(ROOT / "probes" / "custom.json")])
+        probes = self.loaded_probes()
         self.assertEqual(len(probes), 26)
         bbq = next(p for p in probes if p["id"] == "bbq-age-ambiguous")
         winobias = next(p for p in probes if p["id"] == "winobias-pronoun")
@@ -44,8 +52,8 @@ class Phase1Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             data = Path(td) / "data_mock"
             probes = [next(p for p in load_probe_files([str(ROOT / "probes" / "starter.json")]) if p["id"] == "feathers-bricks")]
-            first = run(self.config(data), probes, MockClient(1), data, None, None, False)
-            second = run(self.config(data), probes, MockClient(1), data, None, None, False)
+            first = run(self.config(data), probes, MockClient(probes, seed=1, simulate_errors=False), data, None, None, False)
+            second = run(self.config(data), probes, MockClient(probes, seed=1, simulate_errors=False), data, None, None, False)
             self.assertGreater(first["written"], 0)
             self.assertEqual(second["written"], 0)
             self.assertEqual(second["skipped"], first["written"])
@@ -53,7 +61,7 @@ class Phase1Tests(unittest.TestCase):
     def test_crash_mid_run_resumes_without_duplicates(self):
         class CrashClient(MockClient):
             def __init__(self):
-                super().__init__(1)
+                super().__init__(probes, seed=1, simulate_errors=False)
                 self.calls = 0
             def complete(self, *args, **kwargs):
                 self.calls += 1
@@ -65,7 +73,7 @@ class Phase1Tests(unittest.TestCase):
             probes = [next(p for p in load_probe_files([str(ROOT / "probes" / "starter.json")]) if p["id"] == "feathers-bricks")]
             with self.assertRaises(KeyboardInterrupt):
                 run(self.config(data), probes, CrashClient(), data, None, None, False)
-            result = run(self.config(data), probes, MockClient(1), data, None, None, False)
+            result = run(self.config(data), probes, MockClient(probes, seed=1, simulate_errors=False), data, None, None, False)
             self.assertGreater(result["written"], 0)
             lines = list((data / "responses" / "test__model.jsonl").read_text(encoding="utf-8").splitlines())
             keys = [json.loads(line)["key"] for line in lines if json.loads(line)["status"] == "ok"]
@@ -75,11 +83,91 @@ class Phase1Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             data = Path(td) / "data_mock"
             probes = [next(p for p in load_probe_files([str(ROOT / "probes" / "starter.json")]) if p["id"] == "feathers-bricks")]
-            result = run(self.config(data), probes, MockClient(1, fail_first=True), data, None, None, False)
+            result = run(self.config(data), probes, MockClient(probes, seed=1, fail_first=True, simulate_errors=False), data, None, None, False)
             self.assertEqual(result["errors"], 0)
             records = [json.loads(line) for line in (data / "responses" / "test__model.jsonl").read_text(encoding="utf-8").splitlines()]
             self.assertTrue(all(r["attempts"] >= 2 for r in records))
             self.assertTrue(all(r["schema_version"] == 1 for r in records))
+
+    def test_client_rejects_error_no_choices_and_empty_content(self):
+        payloads = [
+            {"error": {"message": "provider failed"}},
+            {"model": "m", "choices": []},
+            {"model": "m", "choices": [{"message": {"content": ""}, "finish_reason": None}]},
+        ]
+        for payload in payloads:
+            with self.subTest(payload=payload):
+                response = _FakeResponse(json.dumps(payload).encode("utf-8"))
+                with mock.patch("urllib.request.urlopen", return_value=response):
+                    with self.assertRaises(ClientError) as caught:
+                        OpenRouterClient("secret-key").complete("m", "p", 0, 10)
+                self.assertTrue(caught.exception.retryable)
+                self.assertTrue(str(caught.exception))
+
+    def test_client_wraps_parse_and_http_errors_without_key(self):
+        with mock.patch("urllib.request.urlopen", side_effect=ValueError("bad JSON")):
+            with self.assertRaises(ClientError) as caught:
+                OpenRouterClient("secret-key").complete("m", "p", 0, 10)
+        self.assertTrue(caught.exception.retryable)
+        self.assertIn("bad JSON", str(caught.exception))
+
+        body = b"upstream diagnostic secret-key and more details"
+        error = urllib.error.HTTPError("https://example.test", 500, "server", {}, io.BytesIO(body))
+        with mock.patch("urllib.request.urlopen", side_effect=error):
+            with self.assertRaises(ClientError) as caught:
+                OpenRouterClient("secret-key").complete("m", "p", 0, 10)
+        self.assertTrue(caught.exception.retryable)
+        self.assertIn("upstream diagnostic", str(caught.exception))
+        self.assertNotIn("secret-key", str(caught.exception))
+
+    def test_unexpected_client_exception_becomes_error_record_with_real_attempts(self):
+        class BrokenClient:
+            def complete(self, *args, **kwargs):
+                raise RuntimeError("unexpected failure")
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td) / "data_mock"
+            probes = [next(p for p in load_probe_files([str(ROOT / "probes" / "starter.json")]) if p["id"] == "feathers-bricks")]
+            config = self.config(data)
+            result = run(config, probes, BrokenClient(), data, None, None, False)
+            self.assertEqual(result["errors"], result["written"])
+            records = [json.loads(x) for x in (data / "responses" / "test__model.jsonl").read_text().splitlines()]
+            self.assertTrue(all(r["attempts"] == 1 for r in records))
+            self.assertTrue(all("unexpected failure" in r["error"] for r in records))
+
+    def test_truncated_jsonl_line_is_warned_and_run_resumes(self):
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td) / "data_mock"
+            probes = [next(p for p in load_probe_files([str(ROOT / "probes" / "starter.json")]) if p["id"] == "feathers-bricks")]
+            config = self.config(data)
+            run(config, probes, MockClient(probes, seed=1, simulate_errors=False), data, None, None, False)
+            path = data / "responses" / "test__model.jsonl"
+            lines = path.read_text(encoding="utf-8").splitlines()
+            path.write_text("\n".join(lines[:-1]) + "\n{truncated\n", encoding="utf-8")
+            warning = io.StringIO()
+            with redirect_stderr(warning):
+                result = run(config, probes, MockClient(probes, seed=1, simulate_errors=False), data, None, None, False)
+            self.assertEqual(result["written"], 1)
+            self.assertEqual(warning.getvalue().count("Warning: skipping"), 1)
+
+    def test_ping_includes_configured_judge(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            main(["ping", "--mock"])
+        text = output.getvalue()
+        self.assertIn("judge meta-llama/llama-3.3-70b-instruct", text)
+        self.assertIn("model_returned=meta-llama/llama-3.3-70b-instruct", text)
+        self.assertIn("provider=mock", text)
+
+
+class _FakeResponse:
+    def __init__(self, body):
+        self.body = body
+    def __enter__(self):
+        return self
+    def __exit__(self, *args):
+        return False
+    def read(self, *args):
+        return self.body
 
 
 if __name__ == "__main__":
