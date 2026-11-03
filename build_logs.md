@@ -79,3 +79,36 @@ This file is append-only. Each completed implementation phase and review update 
 
 - Commit `47aa173` — `Fix phase 1 runner reliability`
 - Commit `ecc405e` — `Tune deterministic mock probe answers`
+
+## Phase 2 Scorer and Judge
+
+### Scope
+
+- Implemented `probe/scorer.py` with the rule-first pipeline: normalization, refusal detection, probe parsing, regex matching, content-label matching, uncertainty-label handling, hedge detection, and `unscorable` fallback.
+- Implemented `probe/judge.py` as a fallback-only classifier at temperature 0.
+- The judge receives only response text, allowed labels, and `label_help`; it never receives the original probe prompt.
+- Added judge JSONL caching with `judge_prompt_version` included in the cache key.
+- Added required label-record fields, including `scorer_version` and `judge_prompt_version`.
+- Added 31 synthetic judge-test answers, including 10 counter-stereotype cases.
+- Added CLI commands: `score`, `judge-test`, `sample-hand-labels`, and `check-scorer`.
+- Extended the mock client with deterministic judge responses for offline validation.
+
+### Important decisions
+
+- `unknown` and `unclear` are treated as substantive content labels when present in a probe.
+- Uncertainty phrases map to `unknown`/`unclear` rather than `hedge` for those probes.
+- Refusals and hedges are not treated as wrong answers.
+- Multiple content labels go to the judge; without a judge they become `unscorable`.
+- Amounts normalize consistently: `$0.05`, `5 cents`, and `0.05` become `0.05`; `10 cents` becomes `0.10`.
+- Letter answers are mapped through each variant’s option map, including answers with extra text.
+- Judge cache records preserve the judge prompt and response text for auditability while excluding the original question.
+
+### Verification
+
+- `python3 -m unittest` → 20 tests passed.
+- `python3 -m probe score --mock` → 780 responses scored per target model.
+- Mock scoring distribution per model: rule `727/780 (93.2%)`, judge `14/780 (1.8%)`, unscorable `39/780 (5.0%)`.
+- `python3 -m probe judge-test --mock` → rule accuracy `19/31 (61.3%)`; judge accuracy `30/31 (96.8%)`; counter-stereotype judge accuracy `9/10 (90.0%)`.
+- `python3 -m probe sample-hand-labels --n 60 --mock` → wrote 60 stratified rows.
+- `python3 -m probe check-scorer --mock` → correctly reported that no human labels had been filled yet.
+- No real API calls were made and `data/` was not modified.

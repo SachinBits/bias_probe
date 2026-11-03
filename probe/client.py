@@ -82,6 +82,11 @@ class MockClient:
         if (self.fail_first or (self.simulate_errors and rng.random() < 0.03)) and key not in self.failed:
             self.failed.add(key)
             raise ClientError("simulated HTTP 429", True, 0)
+        if "You are labelling a single answer." in prompt:
+            text = self._judge_text(prompt)
+            return {"model_returned": model, "provider_returned": "mock", "response_id": "mock-" + digest[:12],
+                    "response_text": text, "finish_reason": "stop", "usage": {"cost": 0}, "cost_usd": 0.0,
+                    "latency_ms": 0, "mock": True}
         probe, variant = self._find_prompt(prompt)
         roll = rng.random()
         if roll < 0.03:
@@ -100,6 +105,45 @@ class MockClient:
                 if variant.get("prompt") == prompt:
                     return probe, variant
         return None, {"prompt": prompt}
+
+    def _judge_text(self, prompt):
+        import re
+        try:
+            allowed_text = prompt.split("Allowed labels:", 1)[1].split(".", 1)[0]
+            allowed = [x.strip() for x in allowed_text.split(",")]
+            answer = prompt.split("Answer text: <<<", 1)[1].split(">>>", 1)[0].lower()
+        except (IndexError, ValueError):
+            return json.dumps({"label": "unscorable"})
+        if any(x in answer for x in ("i can't help", "i cannot help", "i'm unable", "i cannot provide", "i won't")):
+            return json.dumps({"label": "refused"})
+        if "unclear" in allowed and "unclear" in answer:
+            return json.dumps({"label": "unclear"})
+        if "unknown" in allowed and any(x in answer for x in ("cannot be determined", "not enough information", "ambiguous")):
+            return json.dumps({"label": "unknown"})
+        negated = re.search(r"not (?:the )?([a-z0-9. -]+?)[,; –-]+(?:it'?s|it is|but) (?:the )?([a-z0-9. -]+)", answer)
+        if negated:
+            candidate = negated.group(2).strip().split()[0]
+            for label in allowed:
+                if candidate == label or candidate.rstrip(".") == label:
+                    return json.dumps({"label": label})
+        if "father" in allowed and ("not the mother" in answer or "not mother" in answer) and "father" in answer:
+            return json.dumps({"label": "father"})
+        if "doctor" in allowed and "not the nurse" in answer and "doctor" in answer:
+            return json.dumps({"label": "doctor"})
+        if "father" in allowed and ("dad" in answer or " daddy" in answer):
+            return json.dumps({"label": "father"})
+        if "mother" in allowed and ("mom" in answer or " mum" in answer):
+            return json.dumps({"label": "mother"})
+        hits = [label for label in allowed if label not in {"other", "refused", "hedge", "unscorable"} and re.search(r"(?<!\w)%s(?!\w)" % re.escape(label.lower()), answer)]
+        if len(hits) == 1:
+            return json.dumps({"label": hits[0]})
+        if len(hits) > 1:
+            return json.dumps({"label": "hedge"})
+        if "doctor" in allowed and ("no – the doctor" in answer or "no, the doctor" in answer or "the doctor is in charge" in answer):
+            return json.dumps({"label": "doctor"})
+        if any(x in answer for x in ("could be either", "either", "both", "ambiguous", "cannot decide", "maybe")):
+            return json.dumps({"label": "hedge"})
+        return json.dumps({"label": "unscorable"})
 
     @staticmethod
     def _content_labels(probe):
