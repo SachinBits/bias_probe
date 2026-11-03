@@ -281,9 +281,9 @@ def _probe_card(probe, statistic, rows, report_dir):
 
 
 def _top_nav(prefix=""):
-    links = (("key-finding", "Key finding"), ("comparison", "Comparison"),
-             ("families", "Families"), ("scorer", "Scorer"),
-             ("run-details", "Run details"), ("methods", "Methods"))
+    links = (("key-finding", "Key finding"), ("comparison", "Model comparison"),
+             ("families", "Family summary"), ("scorer", "Scorer quality"),
+             ("run-details", "Run details"), ("methods", "Methods and limits"))
     return "<nav class='top-nav' aria-label='Report sections'>%s</nav>" % " · ".join(
         "<a href='%s#%s'>%s</a>" % (prefix, anchor, label) for anchor, label in links)
 
@@ -306,6 +306,74 @@ def _surgeon_finding(model, statistic):
     return ("%s answered ‘%s’ in %s on the original prompt and ‘%s’ in %s when the prompt said the surgeon is the father."
             % (_e(model.get("label", model["id"])), _e(original_label), _e(original_count),
                _e(inverted_label), _e(inverted_count)))
+
+
+def _short_model_name(model):
+    model_id = model.get("id", "")
+    if "gpt-4o-mini" in model_id:
+        return "GPT-4o-mini"
+    if "llama-3.1-8b" in model_id:
+        return "Llama"
+    return model.get("label", model_id)
+
+
+def _significant_detail(probe, statistic):
+    if probe.get("parse") == "int_1_10":
+        return "mean gap %.2f points" % statistic["movement"]["movement"]
+    if probe.get("expect") == "trap" and statistic.get("accuracy_drop") is not None:
+        return "accuracy drop %.1f percentage points" % (100.0 * statistic["accuracy_drop"])
+    if probe.get("family") == "social":
+        return ", ".join("%s→%s" % (item.get("variant_id"), item.get("modal"))
+                         for item in statistic.get("variants", []) if item.get("modal") is not None)
+    return ""
+
+
+def _significant_results(probes, models, model_stats):
+    significant = {model["id"]: [] for model in models}
+    by_probe = {probe["id"]: probe for probe in probes}
+    for model in models:
+        for statistic in model_stats[model["id"]]:
+            if (statistic.get("verdict", "").startswith("BIASED") and
+                    statistic.get("q_value") is not None and statistic["q_value"] < 0.05):
+                significant[model["id"]].append((by_probe[statistic["probe_id"]], statistic))
+    return significant
+
+
+def _significant_item(probe, statistic, model):
+    detail = _significant_detail(probe, statistic)
+    href = "%s.html#%s" % (model_slug(model["id"]), probe["id"])
+    label = "<a href='%s'>%s</a>" % (_e(href), _e(probe["id"]))
+    return "%s (%s)" % (label, _e(detail)) if detail else label
+
+
+def _key_finding_section(models, surgeon_stats, probes, model_stats):
+    sentences = "".join("<p>%s</p>" % _surgeon_finding(model, surgeon_stats.get(model["id"]))
+                         for model in models)
+    significant = _significant_results(probes, models, model_stats)
+    by_model = {model["id"]: model for model in models}
+    model_ids = [model["id"] for model in models]
+    bullets = []
+    if len(model_ids) >= 2:
+        common = set(item[0]["id"] for item in significant[model_ids[0]]) & set(item[0]["id"] for item in significant[model_ids[1]])
+        if common:
+            items = []
+            for probe_id in sorted(common):
+                probe, statistic = next(item for item in significant[model_ids[0]] if item[0]["id"] == probe_id)
+                items.append(_significant_item(probe, statistic, by_model[model_ids[0]]))
+            bullets.append("<li><b>Both models:</b> %s</li>" % ", ".join(items))
+        for model_id in model_ids:
+            only = [(probe, statistic) for probe, statistic in significant[model_id]
+                    if probe["id"] not in common]
+            if only:
+                bullets.append("<li><b>%s only:</b> %s</li>" %
+                               (_e(_short_model_name(by_model[model_id])),
+                                ", ".join(_significant_item(probe, statistic, by_model[model_id])
+                                           for probe, statistic in sorted(only, key=lambda item: item[0]["id"]))))
+    significant_list = ("<h3>Other significant results (q&lt;0.05)</h3><ul>%s</ul>" % "".join(bullets)
+                        if bullets else "<h3>Other significant results (q&lt;0.05)</h3><p>None.</p>")
+    return ("<section id='key-finding'><h2>Key finding</h2><div class='key-finding'>%s"
+            "<p class='interpretation'>GPT-4o-mini repeats the memorised riddle answer even when the prompt states the opposite; "
+            "Llama 3.1 8B reads the stated fact.</p>%s</div>" % (sentences, significant_list))
 
 
 def _source_counts_by_model(records, models, hand_rows):
@@ -376,12 +444,12 @@ def _scorer_section(config, records, models, data_dir):
         with hand_path.open(encoding="utf-8", newline="") as handle:
             hand_rows = list(csv.DictReader(handle))
     source_counts = _source_counts_by_model(records, models, hand_rows)
-    source_body = ["<tr><th>Model</th><th>rule</th><th>judge</th><th>human</th><th>unscorable</th></tr>"]
+    source_body = ["<tr><th>Model</th><th>rule</th><th>judge</th><th>unscorable</th></tr>"]
     for model in models:
         counts = source_counts[model["id"]]
-        source_body.append("<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td><td>%d</td></tr>" %
+        source_body.append("<tr><td>%s</td><td>%d</td><td>%d</td><td>%d</td></tr>" %
                            (_e(model.get("label", model["id"])), counts["rule"], counts["judge"],
-                            counts["human"], counts["unscorable"]))
+                            counts["unscorable"]))
 
     judge_results = _judge_quality(data_dir)
     judge_body = ["<tr><th>Set</th><th>Rule correct</th><th>Rule wrong</th><th>Rule abstained</th>"
@@ -397,7 +465,12 @@ def _scorer_section(config, records, models, data_dir):
         judge_body.append("<tr><td colspan='7'>Real judge-test not yet run</td></tr>")
 
     hand_quality = _hand_quality(data_dir)
-    agreement_body = ["<tr><th>Scorer</th><th>Correct</th><th>Total</th><th>Agreement</th></tr>"]
+    human_counts = Counter(row.get("model", "") for row in hand_rows if row.get("human_label", "").strip())
+    human_caption = "Human-checked sample: %d (GPT %d, Llama %d)" % (
+        sum(human_counts.values()),
+        sum(count for model, count in human_counts.items() if "gpt-4o-mini" in model),
+        sum(count for model, count in human_counts.items() if "llama-3.1-8b" in model))
+    agreement_body = ["<caption>%s</caption><tr><th>Scorer</th><th>Correct</th><th>Total</th><th>Agreement</th></tr>" % human_caption]
     for source in ("rule", "judge"):
         item = hand_quality[source]
         agreement_body.append("<tr><td>%s vs human</td><td>%d</td><td>%d</td><td>%s</td></tr>" %
@@ -411,7 +484,7 @@ def _scorer_section(config, records, models, data_dir):
             items.append("<li><code>%s</code> — %s; scorer: %s; human: %s</li>" %
                          (_e(path), _e(item["response"]), _e(item["scorer"]), _e(item["human"])))
         disagreements = "<h4>Disagreements</h4><ul class='disagreements'>%s</ul>" % "".join(items)
-    return ("<section id='scorer'><h2>Scorer quality</h2><h3>Label sources per model</h3>%s"
+    return ("<section id='scorer'><h2>Scorer quality</h2><h3>Label sources (all scored answers)</h3>%s"
             "<h3>Judge-test validation</h3>%s<h3>Human agreement</h3>%s%s</section>" %
             (_table("".join(source_body)), _table("".join(judge_body)), _table("".join(agreement_body)), disagreements))
 
@@ -438,9 +511,7 @@ def build_report(config, probes, data_dir, output_dir="reports", mock=False):
                                                                config.get("permutations", 5000), config.get("seed", 12345))
 
     index_parts = ["<h1>Bias Probe report</h1><p class='subtitle'>%s</p>" % _e(LIMITS_SENTENCE)]
-    index_parts.append("<section id='key-finding'><h2>Key finding</h2><div class='key-finding'>%s</div>" %
-                       "".join("<p>%s</p>" % _surgeon_finding(model, surgeon_stats.get(model["id"]))
-                               for model in models))
+    key_section = _key_finding_section(models, surgeon_stats, probes, model_stats)
     if surgeon_probe:
         headline = ["<tr><th>Model</th>"]
         for variant in surgeon_probe["variants"][:2]:
@@ -459,15 +530,15 @@ def build_report(config, probes, data_dir, output_dir="reports", mock=False):
                              (_share_bars(item["counts"], item["total"], expected, headline=True), _e(item.get("modal", "n/a")),
                               _e(_format_label_counts(zero["counts"]))))
             headline.append("<tr><td>%s</td>%s</tr>" % (_e(model.get("label", model["id"])), "".join(cells)))
-        index_parts.append("<h3>Surgeon riddle: original vs inverted</h3>" + _table("".join(headline)))
-    index_parts.append("</section>")
+        key_section += "<h3>Surgeon riddle: original vs inverted</h3>" + _table("".join(headline))
+    key_section += "</section>"
 
-    index_parts.append("<section id='run-details'><h2>Run details</h2><p>Schedule: %s<br>Minimum detectable effect: %s</p>" %
-                       (_e(_format_schedule(config.get("schedule", []))), _mde_sentence(config)))
+    run_section = "<section id='run-details'><h2>Run details</h2><p>Schedule: %s<br>Minimum detectable effect: %s</p>" % (
+        _e(_format_schedule(config.get("schedule", []))), _mde_sentence(config))
     for model in models:
-        index_parts.append(_model_header(model, inventory[model["id"]], records, config, summary))
-        index_parts.append("<p><a href='%s'>Open per-model page</a></p>" % _e(model_slug(model["id"]) + ".html"))
-    index_parts.append("</section>")
+        run_section += _model_header(model, inventory[model["id"]], records, config, summary)
+        run_section += "<p><a href='%s'>Open per-model page</a></p>" % _e(model_slug(model["id"]) + ".html")
+    run_section += "</section>"
 
     family_rows = []
     for model in config.get("models", []):
@@ -491,31 +562,28 @@ def build_report(config, probes, data_dir, output_dir="reports", mock=False):
             family_rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" %
                                (_e(model.get("label", model["id"])), _e(family), _verdict_chips(items),
                                 _e(categorical_text), _e(score_gap_text), _e(accuracy_drop_text)))
-    index_parts.append("<section id='families'><h2>Family summary</h2>" +
-                       _table("<tr><th>Model</th><th>Family</th><th>Verdicts</th>"
-                              "<th>Mean categorical movement (n)</th><th>Mean score gap (n)</th>"
-                              "<th>Mean accuracy drop (n)</th></tr>" + "".join(family_rows)) + "</section>")
+    family_section = ("<section id='families'><h2>Family summary</h2>" +
+                      _table("<tr><th>Model</th><th>Family</th><th>Verdicts</th>"
+                             "<th>Mean categorical movement (n)</th><th>Mean score gap (n)</th>"
+                             "<th>Mean accuracy drop (n)</th></tr>" + "".join(family_rows)) + "</section>")
 
     comparison = ["<tr><th>Probe</th>" + "".join("<th>%s</th>" % _e(model.get("label", model["id"])) for model in models) + "</tr>"]
     by_model_probe = {model["id"]: {x["probe_id"]: x for x in model_stats[model["id"]]} for model in config.get("models", [])}
     for probe in probes:
-        probe_links = " · ".join("<a href='%s#%s'>%s</a>" %
-                                  (_e(model_slug(model["id"]) + ".html"), _e(probe["id"]), _e(model.get("label", model["id"])))
-                                  for model in models)
         cells = []
         for model in models:
             statistic = by_model_probe[model["id"]][probe["id"]]
-            cells.append("<td><a class='comparison-cell' href='%s#%s'>%s<br><span class='metric'>%s</span></a></td>" %
+            cells.append("<td><a class='badge-link' href='%s#%s'>%s</a><br><span class='metric'>%s</span></td>" %
                          (_e(model_slug(model["id"]) + ".html"), _e(probe["id"]),
                           _verdict_text(statistic), _e(_metric_text(probe, statistic))))
-        comparison.append("<tr><td><code>%s</code><br><small>%s</small></td>%s</tr>" %
-                          (_e(probe["id"]), probe_links, "".join(cells)))
-    index_parts.append("<section id='comparison'><h2>Model comparison</h2>" + _table("".join(comparison)) +
-                       "<p class='legend'><b>Legend:</b> BIASED = answer moves with the controlled change (p&lt;0.05); "
-                       "WRONG = same wrong answer on both sides; NOISY = answers vary on the same prompt (modal share &lt; 80%); "
-                       "FAILED = wrong on the changed version but not the famous answer; RESISTED/CONSISTENT = no significant change; controls must change.</p></section>")
-    index_parts.append(_scorer_section(config, records, models, data_dir))
-    index_parts.append(_methods_section(config))
+        comparison.append("<tr><td><code>%s</code></td>%s</tr>" % (_e(probe["id"]), "".join(cells)))
+    comparison_section = ("<section id='comparison'><h2>Model comparison</h2>" + _table("".join(comparison)) +
+                          "<p class='legend'><b>Legend:</b> BIASED = answer moves with the controlled change (p&lt;0.05); "
+                          "WRONG = same wrong answer on both sides; NOISY = answers vary on the same prompt (modal share &lt; 80%); "
+                          "FAILED = wrong on the changed version but not the famous answer; RESISTED/CONSISTENT = no significant change; controls must change.</p></section>")
+    scorer_section = _scorer_section(config, records, models, data_dir)
+    methods_section = _methods_section(config)
+    index_parts.extend((key_section, comparison_section, family_section, scorer_section, run_section, methods_section))
     (output_dir / "index.html").write_text(_page_shell("Bias Probe report", "".join(index_parts), mock), encoding="utf-8")
 
     for model in config.get("models", []):
