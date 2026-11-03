@@ -1,4 +1,6 @@
+import html
 import json
+import re
 import shutil
 import subprocess
 import tempfile
@@ -10,10 +12,38 @@ import urllib.request
 from html.parser import HTMLParser
 from pathlib import Path
 
-from probe.bank import load_probe_files
+from probe.bank import load_probe_files, validate_probe
 from probe.config import load_config
 from probe.report import _finding_title, _top_finding_sentence, build_report
 from probe.server import create_server
+
+
+# A minimal DOM: just enough for the live page's script. The select keeps real
+# browser behaviour: assigning a value that has no <option> leaves it empty.
+FAKE_DOM = r"""
+var DATA=%s, OPTIONS=%s, SCRIPT=%s, byId={}, posted=[];
+function el(tag){var e={tag:tag,children:[],className:"",value:"",hidden:false,required:false,textContent:"",style:{},
+  append:function(){for(var i=0;i<arguments.length;i++)if(typeof arguments[i]==="object")e.children.push(arguments[i])},
+  appendChild:function(c){e.children.push(c)},replaceChildren:function(){e.children=[].slice.call(arguments)},remove:function(){},focus:function(){},
+  all:function(){var out=[];e.children.forEach(function(c){out.push(c);out=out.concat(c.all())});return out},
+  querySelector:function(q){return e.all().filter(function(c){return "."+c.className===q})[0]},
+  querySelectorAll:function(q){return e.all().filter(function(c){return "."+c.className===q||(q===".schedule-row"&&/schedule-row/.test(c.className))})}};return e}
+var select=el("select"),selected="";Object.defineProperty(select,"value",{get:function(){return selected},set:function(v){selected=OPTIONS.indexOf(v)>=0?v:""}});
+byId.pid=select;
+Object.keys(DATA).forEach(function(k){var e=el("script");e.textContent=DATA[k];byId[k]=e});
+global.document={getElementById:function(id){return byId[id]||(byId[id]=el("div"))},createElement:el,
+  querySelector:function(){return el("div")},
+  querySelectorAll:function(q){if(q==="input[name=model]:checked"){var m=el("input");m.value="openai/gpt-4o-mini-2024-07-18";return [m]}return byId.schedule.querySelectorAll(q)}};
+global.alert=function(){};global.setInterval=function(){return 0};global.clearInterval=function(){};
+global.fetch=function(url,opts){if(opts)posted.push(JSON.parse(opts.body));return new Promise(function(){})};
+new Function(SCRIPT)();
+byId.example.onclick();
+var missing=[select.value===""&&"pid",byId["custom-pid"].required&&byId["custom-pid"].value===""&&"custom-pid",byId.labels.value===""&&"labels"].filter(Boolean);
+if(missing.length){console.error("form not submittable: "+missing.join(","));process.exit(1)}
+byId["live-form"].onsubmit({preventDefault:function(){}});
+console.log(JSON.stringify({select:select.value,custom:byId["custom-pid"].value,customHidden:byId["custom-pid"].hidden,customRequired:byId["custom-pid"].required,payload:posted[0]}));
+process.exit(0);
+"""
 
 
 class Phase5DashboardTests(unittest.TestCase):
@@ -27,11 +57,33 @@ class Phase5DashboardTests(unittest.TestCase):
             output = Path(tmp) / "reports"
             build_report(self.config, self.probes, Path("data"), output, mock=False)
             text = (output / "index.html").read_text(encoding="utf-8")
-            self.assertIn("Probes", text)
             self.assertNotIn("<small>Calls</small>", text)
             self.assertIn("Calls:", text)
-            self.assertIn("Significant biases", text)
-            self.assertIn("Scorer check", text)
+            self.assertIn("Biases found", text)
+            self.assertIn("of 26 probes, after multiple-test correction", text)
+            self.assertIn("<strong>3/4 · 4/4</strong>", text)
+            self.assertIn("the tool detects real changes", text)
+            self.assertIn("Rules 100% · Judge 79%", text)
+            self.assertIn("60 hand-checked answers", text)
+            self.assertIn("26 probes · 2 models · 13 runs per prompt.", text)
+            self.assertLess(text.index("Key finding"), text.index("Verdicts are probe-level signals"))
+            self.assertIn("Prompt says: surgeon is the father", text)
+            self.assertIn("mother 10/10 ✓", text)
+            self.assertIn("mother 10/10 ✗", text)
+            self.assertNotIn("modal: ", text)
+            self.assertNotIn("answer changed (", text)
+            self.assertNotIn("same answer", text)
+            self.assertIn("nurse 10/10 → doctor 10/10", text)
+            self.assertIn(">View →</a>", text)
+            self.assertNotIn(">Open ", text)
+            self.assertIn("<span class='verdict-badge outcome-bias' title='BIASED (pattern)'>Bias</span><span class='outcome-detail'> · pattern</span>", text)
+            self.assertIn("<span class='verdict-badge outcome-ok' title='CONTROL OK'>OK</span><span class='outcome-detail'> · control</span>", text)
+            families = text[text.index("<section id='families'"):text.index("</section>", text.index("<section id='families'"))]
+            self.assertIn("<th>GPT-4o-mini</th><th>Llama</th>", families)
+            self.assertIn("Familiar pattern", families)
+            self.assertNotIn("Mean categorical movement", families)
+            self.assertIn("min-height:100%", text)
+            self.assertIn("position:sticky", text)
             self.assertIn("GPT-4o-mini answers 'mother' 10/10 even when the prompt says the surgeon is the father.", text)
             self.assertIn("Top findings", text)
             surgeon = next(p for p in self.probes if p["id"] == "surgeon-riddle")
@@ -62,6 +114,33 @@ class Phase5DashboardTests(unittest.TestCase):
         self.assertIn("user-wrong 1581 → 1581 ×6", _top_finding_sentence(probe, {model: higher}))
         self.assertEqual(_finding_title(probe, {model: lower}), "Answer shifts when the user states an opinion (away from the claim)")
         self.assertIn("neutral 1581 ×8 (wrong on its own)", _top_finding_sentence(probe, {model: lower}))
+
+    def test_load_example_produces_submittable_form(self):
+        """Run live.html's real script against a small fake DOM, then click Load example and Run."""
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        with tempfile.TemporaryDirectory() as tmp:
+            output = Path(tmp) / "reports"
+            build_report(self.config, self.probes, Path("data_mock"), output, mock=True)
+            page = (output / "live.html").read_text(encoding="utf-8")
+            script = re.findall(r"<script>(.*?)</script>", page, flags=re.S)
+            live_script = next(body for body in script if "live-form" in body)
+            data = {name: re.search(r"<script type='application/json' id='%s'>(.*?)</script>" % name, page, flags=re.S).group(1)
+                    for name in ("example-data", "config-data", "probe-data")}
+            options = [html.unescape(v) for v in re.findall(r"<option value='([^']*)'", re.search(r"<select id='pid'[^>]*>(.*?)</select>", page, flags=re.S).group(1))]
+            harness = FAKE_DOM % (json.dumps(data), json.dumps(options), json.dumps(live_script))
+            path = Path(tmp) / "harness.js"
+            path.write_text(harness, encoding="utf-8")
+            done = subprocess.run([node, str(path)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True, timeout=30)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        state = json.loads(done.stdout)
+        self.assertEqual(state["select"], "__custom__")
+        self.assertFalse(state["customHidden"])
+        self.assertTrue(state["customRequired"])
+        self.assertEqual(state["custom"], "demo-surgeon-riddle")
+        self.assertEqual(state["payload"]["probe"]["id"], "demo-surgeon-riddle")
+        validate_probe(state["payload"]["probe"], "test")
 
     def test_live_scripts_parse_and_example_is_real_bank_json(self):
         class Scripts(HTMLParser):

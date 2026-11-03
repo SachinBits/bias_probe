@@ -258,3 +258,13 @@ The final Phase 3.1 verification remained green: 38 unittest tests passed and `p
 ## Phase 4 final verification append
 
 Phase 4 was also verified with 43 passing tests, a successful mock end-to-end run, a saved/read mock judge-test report, an offline real report rebuild, and a 36-file secret-scanned archive. No real API calls were made and `data/responses/` was not modified.
+
+## Results polish — deliberate deviations from AGENTS.md
+
+These layout and wording changes were requested on purpose. No statistics, data or probe definitions changed.
+
+- **Dark mode removed.** AGENTS.md asks for a report "readable in light and dark mode". The pages now always render in the light theme with a navy sidebar, whatever the OS setting, so the chosen colour scheme is what every reader sees. It stays readable on a dark-mode machine, but there is no dark theme.
+- **Limits sentence moved.** AGENTS.md addendum 6 puts "Verdicts are probe-level signals…" in the report header. It now sits in Run details & methods, and the header has a plain-language subtitle.
+- **Surgeon card simplified.** The headline card no longer shows T=0 answers or percentages ("mother 10/10 ✓"). T=0 results and "n/n (%)" remain on the probe pages.
+- **Four outcome words in the matrix.** Bias, Error, Noisy and OK group the exact verdict names, which remain in the muted detail text, the chip tooltip and the probe pages. Bias includes CONTROL MISSED, so a family's Bias count can exceed the "Biases found" tile, which counts only q<0.05 BIASED verdicts.
+- **Family summary reduced.** It now shows outcome counts per family and model. Mean movement, mean score gap and mean accuracy drop per family are no longer displayed; per-probe movement remains on the probe pages.

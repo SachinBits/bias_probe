@@ -165,47 +165,71 @@ def _model_header(model, info, records, config, summary):
 
 
 CSS = """
-:root { color-scheme: light dark; --bg:#f7f8fc; --fg:#20212b; --muted:#747b8f; --card:#fff; --line:#e4e6ee; --accent:#5965f2; --accent-soft:#eef0ff; --nav-bg:#17182d; --nav-fg:#fff; --nav-muted:#b9bddb; }
-@media (prefers-color-scheme: dark) { :root { --bg:#101426; --fg:#edf0fa; --muted:#a6aec4; --card:#182039; --line:#2b3550; --accent:#9da7ff; --accent-soft:#252c51; --nav-bg:#0b0d1c; --nav-fg:#f7f8ff; --nav-muted:#b7bddb; } }
-* { box-sizing:border-box; } html, body { max-width:100%; overflow-x:hidden; }
-body { margin:0; padding:0; font:15px/1.5 system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; background:var(--bg); color:var(--fg); }
-main { max-width:1200px; min-width:0; margin:auto; padding:0 1rem 2rem; } a { color:var(--fg); text-decoration:none; } a:hover { color:var(--accent); } table { width:100%; border-collapse:collapse; margin:1rem 0 2rem; }
-th,td { text-align:left; vertical-align:top; border-bottom:1px solid var(--line); padding:.55rem; } th { position:sticky; top:0; background:var(--card); }
-.card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:1rem; margin:1rem 0; }
-.mock { background:#b42318; color:#fff; padding:1rem; text-align:center; font-weight:800; font-size:1.2rem; }
-.verdict-badge, .verdict-chip { display:inline-block; border-radius:999px; padding:.12rem .55rem; font-weight:700; white-space:nowrap; }
-.verdict-bad, .verdict-pattern { background:#fee4e2; color:#b42318; } .verdict-failed { background:#ffead5; color:#9a3412; }
-.verdict-noisy { background:#fef0c7; color:#854d0e; } .verdict-wrong { background:#e5e7eb; color:#374151; }
-.verdict-good { background:#dcfce7; color:#166534; } .verdict-neutral { background:var(--line); color:var(--fg); }
-.q-marker { font-weight:500; opacity:.8; } .warning { color:#f04438; }
-.muted { color:var(--muted); } .bar { display:block; position:relative; min-width:180px; margin:.15rem 0; background:var(--line); border-radius:4px; overflow:hidden; }
-.bar b { display:block; height:1.25rem; opacity:.72; } .bar.correct b { background:#16a34a; } .bar.wrong b, .bar.pattern b { background:#dc2626; } .bar.neutral b { background:#9ca3af; }
-.bar span { position:absolute; left:.3rem; top:0; font-size:.8rem; }
-details { margin:.35rem 0; border:1px solid var(--line); padding:.45rem; border-radius:5px; } pre { white-space:pre-wrap; overflow-wrap:anywhere; }
-code { overflow-wrap:anywhere; } .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:1rem; }
-.dashboard-bar { display:flex; align-items:center; justify-content:space-between; gap:1rem; width:100%; margin:0 0 1.25rem; padding:.9rem max(1rem, calc((100% - 1200px) / 2 + 1rem)); background:var(--nav-bg); color:var(--nav-fg); border-bottom:1px solid rgba(255,255,255,.08); }
-.brand { color:var(--nav-fg); font-weight:800; font-size:1.15rem; letter-spacing:-.02em; } .brand:hover { color:#c6caff; } .tabs { display:flex; gap:1rem; } .tabs a { color:var(--nav-muted); } .tabs a.active { color:var(--nav-fg); font-weight:700; }
-.model-line { color:var(--muted); font-size:.78rem; margin-left:auto; text-align:right; } .kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:.75rem; margin:1rem 0; }
-.model-line { color:var(--nav-muted); } .kpi { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.8rem; min-width:0; } .kpi strong { display:block; font-size:1.15rem; } .kpi small { color:var(--muted); }
-.model-pill { display:inline-block; border:1px solid var(--line); border-radius:999px; padding:.12rem .5rem; color:var(--muted); font-size:.8rem; margin-right:.25rem; }
-.finding-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); gap:.75rem; } .finding-card { background:var(--card); border:1px solid var(--line); border-radius:8px; padding:.8rem; } .finding-card h3 { margin-top:0; font-size:1rem; } .finding-card p { margin:.4rem 0; } .finding-link { color:var(--accent); font-weight:600; }
-.filter-chips { display:flex; flex-wrap:wrap; gap:.45rem; margin:.5rem 0 1rem; } .filter-chip { border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:999px; padding:.3rem .65rem; cursor:pointer; }
-.filter-chip.active { border-color:var(--accent); color:var(--accent); background:var(--accent-soft); } .family-row td { background:var(--accent-soft); font-weight:700; border-top:1px solid var(--line); }
-.comparison-row { cursor:pointer; } .metric { color:var(--muted); font-size:.85rem; } .probe-why { color:var(--muted); font-size:.85rem; }
-.probe-model-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; } .probe-model { min-width:0; }
-.result-bar { min-width:120px; } .api-error { border-left:4px solid #b42318; }
-.form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; } label { display:block; font-weight:600; } input, select, textarea { width:100%; font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:.45rem; } textarea { min-height:5rem; resize:vertical; }
-.model-option { display:flex; align-items:center; gap:.45rem; } .model-option input { width:auto; margin:0; }
-.variant-form { display:grid; grid-template-columns:8rem minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) auto; gap:.5rem; align-items:start; margin:.5rem 0; } button { font:inherit; cursor:pointer; } .button { border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:6px; padding:.45rem .7rem; } .button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
-.progress-track { height:.7rem; background:var(--line); border-radius:999px; overflow:hidden; } .progress-fill { height:100%; width:0; background:var(--accent); transition:width .2s; }
-.top-nav { margin:.75rem 0 1.5rem; font-size:.9rem; } .top-nav a { white-space:nowrap; }
-.table-wrap { max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; }
-.key-finding { background:var(--card); border-left:5px solid var(--accent); border-radius:8px; padding:1rem 1.25rem; }
-.legend { color:var(--muted); font-size:.92rem; } .disagreements { margin-top:.4rem; }
+:root { color-scheme:light; --bg:#fff; --fg:#1f2133; --muted:#6b6e85; --faint:#9294ab; --card:#fff; --line:#e4e4e4; --head:#f5f5f7; --hover:#f8f9fc; --accent:#464edf; --accent-dark:#3a41c4; --accent-soft:#eeeffd; --periwinkle:#b6b9f5; --nav-bg:#1b1d36; --nav-active:#262847; --nav-fg:#fff; --nav-muted:#a3a5c4; --nav-faint:#7d80a7; --good:#16792a; --good-bg:#e5f6e8; --bad:#c81e1b; --bad-bg:#fdecec; }
+* { box-sizing:border-box; }
+html,body { background:var(--bg); min-height:100%; } html { -webkit-text-size-adjust:100%; }
+body { margin:0; font:14px/1.55 Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; background:var(--bg); color:var(--fg); -webkit-font-smoothing:antialiased; font-variant-numeric:tabular-nums; }
+h1,h2,h3,h4 { color:var(--fg); line-height:1.3; letter-spacing:-.01em; margin:0; }
+h1 { font-size:22px; font-weight:700; } h2 { font-size:17px; font-weight:650; margin:36px 0 14px; } h3 { font-size:14px; font-weight:650; margin:24px 0 10px; } h4 { font-size:13px; font-weight:650; margin:16px 0 8px; }
+p { margin:0 0 8px; } ul { margin:8px 0; padding-left:18px; } li { margin:4px 0; } small { font-size:12px; }
+a { color:var(--accent); text-decoration:none; } a:hover { color:var(--accent-dark); text-decoration:underline; }
+code,pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px; } code { overflow-wrap:anywhere; } pre { margin:0; white-space:pre-wrap; overflow-wrap:anywhere; }
+.muted,.subtitle { color:var(--muted); } .warning { color:var(--bad); }
+.app { display:grid; grid-template-columns:248px minmax(0,1fr); min-height:100vh; }
+.sidebar { position:sticky; top:0; align-self:start; height:100vh; overflow-y:auto; display:flex; flex-direction:column; background:var(--nav-bg); color:var(--nav-muted); padding:22px 14px; }
+.brand { display:block; color:var(--nav-fg); font-size:18px; font-weight:700; letter-spacing:-.02em; padding:0 10px 22px; } .brand:hover { color:var(--nav-fg); text-decoration:none; }
+.nav-label { color:var(--nav-faint); font-size:11px; font-weight:650; letter-spacing:.08em; text-transform:uppercase; padding:14px 10px 6px; }
+.nav-link { display:block; position:relative; color:var(--nav-muted); padding:8px 10px; margin:1px 0; border-radius:7px; } .nav-link:hover { color:var(--nav-fg); background:var(--nav-active); text-decoration:none; }
+.nav-link.active { color:var(--nav-fg); background:var(--nav-active); font-weight:600; } .nav-link.active::before { content:""; position:absolute; left:-8px; top:7px; bottom:7px; width:3px; border-radius:2px; background:var(--accent); }
+.nav-models { margin-top:auto; padding-top:22px; } .nav-model { padding:4px 10px; color:var(--nav-fg); font-size:12.5px; } .nav-model small { display:block; color:var(--nav-faint); font-size:11px; overflow-wrap:anywhere; }
+.content { min-width:0; }
+main { min-width:0; padding:0 32px 56px; } .content main { max-width:1240px; } body > main { max-width:1200px; margin:auto; padding-top:24px; }
+.page-head { margin:0 -32px 24px; padding:20px 32px 18px; border-bottom:1px solid var(--line); } .page-head .subtitle { margin:4px 0 0; } .crumb { display:inline-block; font-size:12.5px; margin-bottom:6px; } .tags { display:flex; flex-wrap:wrap; gap:6px; margin-top:10px; }
+.tag { display:inline-block; border-radius:5px; padding:2px 8px; font-size:12px; font-weight:500; color:var(--muted); background:var(--head); }
+.mock { background:var(--bad); color:#fff; padding:12px; text-align:center; font-weight:700; font-size:16px; }
+.card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin:14px 0; } .card > h3:first-child { margin-top:0; }
+.kpis { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:12px; margin:0 0 8px; } .kpi { border:1px solid var(--line); border-radius:10px; padding:14px 16px; min-width:0; } .kpi small { display:block; color:var(--muted); font-size:11px; font-weight:650; letter-spacing:.06em; text-transform:uppercase; margin-bottom:5px; } .kpi strong { display:block; font-size:15px; font-weight:650; } .kpi-note { display:block; color:var(--muted); font-size:12px; margin-top:3px; }
+.key-finding { background:var(--accent-soft); border-radius:10px; padding:16px 20px; } .headline-sentence { font-size:15px; font-weight:600; margin-bottom:4px; } .interpretation { color:var(--muted); margin:0; }
+.table-wrap { max-width:100%; overflow-x:auto; -webkit-overflow-scrolling:touch; border:1px solid var(--line); border-radius:10px; margin:12px 0; } .card .table-wrap { border:0; border-radius:0; margin:0 -4px; }
+table { width:100%; border-collapse:collapse; } caption { text-align:left; color:var(--muted); font-size:12.5px; padding:10px 14px 2px; }
+th,td { text-align:left; vertical-align:top; border-bottom:1px solid var(--line); padding:11px 14px; } tr:last-child > td { border-bottom:0; }
+th { background:var(--head); font-size:12.5px; font-weight:600; color:var(--fg); white-space:nowrap; } th br,td > br { display:none; } th small { display:block; font-weight:400; color:var(--muted); }
+.card th { background:transparent; color:var(--muted); padding-top:4px; } .card td,.card th { padding-left:6px; padding-right:12px; }
+.metric,.probe-why { display:block; color:var(--muted); font-size:12.5px; margin-top:3px; } .surgeon-grid .bar { min-width:220px; }
+.verdict-badge { display:inline-block; border-radius:5px; padding:2px 7px; font-size:11.5px; font-weight:650; letter-spacing:.01em; white-space:nowrap; }
+.verdict-chip { display:inline-block; margin:2px 8px 2px 0; font-size:12px; white-space:nowrap; } .verdict-chip b { font-weight:600; color:var(--muted); }
+.verdict-bad,.verdict-pattern { background:var(--bad-bg); color:var(--bad); } .verdict-failed { background:#fff1e6; color:#b4530f; } .verdict-noisy { background:#fdf6d8; color:#856400; } .verdict-wrong { background:#eeeef3; color:#4a4c63; } .verdict-good { background:var(--good-bg); color:var(--good); } .verdict-neutral { background:var(--head); color:var(--muted); }
+.outcome-bias { background:var(--bad-bg); color:var(--bad); } .outcome-error { background:#fff1e6; color:#b4530f; } .outcome-noisy { background:#fdf6d8; color:#856400; } .outcome-ok { background:var(--good-bg); color:var(--good); } .outcome-zero { background:var(--head); color:var(--faint); font-weight:500; } .outcome-detail { color:var(--muted); font-size:12px; } .outcome-counts { display:inline-flex; flex-wrap:wrap; gap:4px; }
+.q-marker { color:var(--faint); font-size:11.5px; font-weight:500; margin-left:3px; }
+.bar { display:block; position:relative; min-width:150px; height:26px; margin:3px 0; background:#f3f4f8; border-radius:5px; overflow:hidden; } .bar b { display:block; height:100%; } .bar.correct b { background:#c9ecd0; } .bar.wrong b,.bar.pattern b { background:#f9d0cf; } .bar.neutral b { background:#dcdef8; }
+.bar span { position:absolute; left:9px; right:6px; top:0; line-height:26px; font-size:12.5px; color:var(--fg); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.finding-grid { border:1px solid var(--line); border-radius:10px; overflow:hidden; } .finding-card { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1.25fr) 56px; column-gap:24px; align-items:start; padding:13px 16px; border-bottom:1px solid var(--line); } .finding-card:last-child { border-bottom:0; }
+.finding-card h3 { grid-column:1; margin:0; font-size:13.5px; } .finding-card > p { margin:0; } .finding-card > p.muted { grid-column:1; font-size:12.5px; margin-top:2px; } .finding-card > p:nth-of-type(2) { grid-column:2; grid-row:1 / span 2; font-size:13px; } .finding-card > p:nth-of-type(3) { display:none; } .finding-link { grid-column:3; grid-row:1 / span 2; font-size:12.5px; font-weight:600; text-align:right; overflow-wrap:anywhere; }
+.filter-chips { display:inline-flex; flex-wrap:wrap; gap:2px; padding:3px; margin:0 0 4px; background:var(--head); border-radius:8px; } .filter-chip { border:0; background:transparent; color:var(--muted); border-radius:6px; padding:5px 11px; font:inherit; font-size:12.5px; font-weight:550; cursor:pointer; } .filter-chip:hover { color:var(--fg); } .filter-chip.active { background:#fff; color:var(--fg); font-weight:650; box-shadow:0 1px 2px rgba(27,29,54,.14); }
+.family-row td { background:#f6f6fb; color:var(--muted); font-size:11px; font-weight:650; letter-spacing:.07em; text-transform:uppercase; padding:7px 14px; }
+.comparison-row { cursor:pointer; } .comparison-row:hover td { background:var(--hover); } .comparison-row td:first-child code { display:block; font:inherit; font-weight:600; color:var(--accent); } .badge-link:hover { text-decoration:none; } .legacy-link { display:none; } #families td:first-child { white-space:nowrap; font-weight:550; }
+.legend { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:6px 24px; margin:12px 0 0; color:var(--muted); font-size:12.5px; } .legend div { display:flex; gap:8px; align-items:baseline; } .legend .verdict-badge { flex:none; }
+details { min-width:0; } summary { cursor:pointer; }
+main > details { border:1px solid var(--line); border-radius:10px; margin:12px 0; padding:0 18px; } main > details:first-of-type { margin-top:32px; } main > details > summary { font-size:14px; font-weight:650; padding:13px 0; } main > details[open] { padding-bottom:14px; } main > details > section > h2:first-child { display:none; } main > details h2 { font-size:14px; margin:20px 0 8px; } main > details h3 { margin-top:18px; }
+.prompts h2 { margin-top:0; } .prompt-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; } .prompt { background:#f6f6fb; border-radius:10px; padding:13px 15px; min-width:0; } .prompt-head { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 12px; margin-bottom:6px; font-size:12.5px; font-weight:650; } .prompt-head span { color:var(--muted); font-weight:500; } .prompt p { margin:0; white-space:pre-line; overflow-wrap:anywhere; }
+.probe-model-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:0; margin-top:8px; } .probe-model { min-width:0; } .probe-model-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:6px; } .probe-model-head h3 { margin:0; font-size:15px; } .stat-line { color:var(--muted); font-size:12.5px; margin:0 0 2px; } .stats { margin-bottom:12px; }
+.result-table td { vertical-align:middle; } .result-table .variant-name { font-weight:600; } .result-table .dist { width:46%; min-width:220px; } .result-table td:not(.dist) { white-space:nowrap; }
+.raw-group { border-top:1px solid var(--line); } .raw-group:first-of-type { margin-top:8px; } .raw-group > summary { padding:9px 0; font-size:13px; font-weight:550; color:var(--accent); } .raw-group[open] { padding-bottom:8px; }
+.raw { border:1px solid var(--line); border-radius:7px; margin:4px 0; } .raw > summary { display:flex; flex-wrap:wrap; gap:4px 12px; padding:7px 11px; font-size:12.5px; } .raw-label { font-weight:650; } .raw-meta { color:var(--muted); } .raw pre { padding:10px 11px; border-top:1px solid var(--line); background:#fafafc; } .raw-source { margin:0; padding:7px 11px; border-top:1px solid var(--line); color:var(--muted); font-size:11.5px; overflow-wrap:anywhere; }
+.form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px 16px; } label { display:block; font-size:12.5px; font-weight:600; color:var(--fg); }
+label > input,label > select,label > textarea { margin-top:5px; } input,select,textarea { width:100%; font:inherit; font-size:14px; font-weight:400; color:var(--fg); background:#fff; border:1px solid #d9d9e0; border-radius:8px; padding:8px 11px; } input:focus,select:focus,textarea:focus { outline:2px solid var(--periwinkle); outline-offset:0; border-color:var(--accent); } input::placeholder,textarea::placeholder { color:var(--faint); } textarea { min-height:5rem; resize:vertical; }
+.model-option { display:flex; align-items:center; gap:8px; font-weight:500; font-size:14px; } .model-option input { width:auto; margin:0; accent-color:var(--accent); }
+.variant-form { display:grid; grid-template-columns:8rem minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) auto; gap:8px; align-items:start; margin:8px 0; } .schedule-row { margin-bottom:10px; } #add-variant { margin-right:8px; }
+button { font:inherit; cursor:pointer; } .button { border:1px solid #d9d9e0; background:#fff; color:var(--fg); border-radius:8px; padding:7px 13px; font-size:13px; font-weight:550; } .button:hover { background:var(--head); } .button.primary { background:var(--accent); border-color:var(--accent); color:#fff; font-weight:650; padding:9px 22px; } .button.primary:hover { background:var(--accent-dark); } .button:disabled { opacity:.5; cursor:not-allowed; } .button.primary:disabled { background:var(--periwinkle); border-color:var(--periwinkle); opacity:1; }
+#progress { color:var(--muted); font-size:12.5px; margin:16px 0 6px; } .progress-track { height:6px; background:var(--head); border-radius:999px; overflow:hidden; margin-bottom:16px; } .progress-fill { height:100%; width:0; background:var(--accent); transition:width .2s; }
+.top-nav { margin:0 0 20px; font-size:13px; color:var(--faint); } .top-nav a { white-space:nowrap; } .disagreements { margin-top:6px; font-size:13px; } .api-error { border-left:3px solid var(--bad); }
+@media (max-width:900px) {
+  .app { display:block; } .sidebar { position:static; align-self:auto; height:auto; padding:12px 16px; display:block; } .brand { padding:0 0 8px; } .nav-label,.nav-models { display:none; } .nav-group { display:inline; } .nav-link { display:inline-block; padding:5px 9px; font-size:13px; } .nav-link.active::before { display:none; }
+  .finding-card { grid-template-columns:minmax(0,1fr); row-gap:4px; } .finding-card h3,.finding-card > p.muted,.finding-card > p:nth-of-type(2),.finding-link { grid-column:1; grid-row:auto; } .finding-link { text-align:left; }
+}
 @media (max-width:700px) {
-  body { padding:0; } main { padding:0 .75rem 2rem; } .dashboard-bar { align-items:flex-start; flex-wrap:wrap; } .model-line { flex-basis:100%; text-align:left; margin-left:0; } .kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } .form-grid, .probe-model-grid { grid-template-columns:1fr; } .variant-form { grid-template-columns:1fr; } .variant-table, .variant-table tbody, .variant-table tr, .variant-table td { display:block; width:100%; }
-  .variant-table td { border:1px solid var(--line); border-radius:8px; margin:.6rem 0; } .variant-table tr { display:block; }
-  .variant-table .variant-spacer { display:none; } th { position:static; }
+  main { padding:0 16px 40px; } .page-head { margin:0 -16px 18px; padding:16px; } .kpis,.form-grid,.variant-form { grid-template-columns:minmax(0,1fr); } .result-table .dist { min-width:180px; }
+  .variant-table,.variant-table tbody,.variant-table tr,.variant-table td { display:block; width:100%; } .variant-table td { border:1px solid var(--line); border-radius:8px; margin:8px 0; }
 }
 """
 
@@ -216,12 +240,13 @@ def _raw_details(rows, label_lookup):
         identity = (row.get("key"), row.get("probe_id"), row.get("variant_id"), row.get("repeat_index"),
                     (row.get("params") or {}).get("temperature"))
         label = label_lookup.get(identity, {})
-        chunks.append("<details><summary>%s — source=%s, T=%s, repeat=%s, timestamp=%s, provider=%s; file=%s:%s</summary>"
-                      "<pre>%s</pre></details>" %
-                      (_e(label.get("label", "unscorable")), _e(label.get("source", "none")),
-                       _e((row.get("params") or {}).get("temperature")), _e(row.get("repeat_index")),
+        chunks.append("<details class='raw'><summary><span class='raw-label'>%s</span>"
+                      "<span class='raw-meta'>T=%s · repeat %s · scored by %s</span></summary>"
+                      "<pre>%s</pre><p class='raw-source'>%s · provider %s · %s:%s</p></details>" %
+                      (_e(label.get("label", "unscorable")), _e((row.get("params") or {}).get("temperature")),
+                       _e(row.get("repeat_index")), _e(label.get("source", "none")), _e(row.get("response_text", "")),
                        _e(row.get("timestamp_utc")), _e(row.get("provider_returned")),
-                       _e(row.get("_file")), _e(row.get("_line")), _e(row.get("response_text", ""))))
+                       _e(row.get("_file")), _e(row.get("_line"))))
     return "".join(chunks)
 
 
@@ -501,7 +526,7 @@ def _top_findings(probes, models, model_stats):
         if len(cards) >= 5 or family_counts[probe.get("family")] >= 2:
             continue
         chosen_models = [model_by_id[model_id] for model_id in per_model]
-        cards.append("<article class='finding-card'><h3>%s</h3><p class='muted'>%s</p><p>%s</p><p>%s</p><a class='finding-link' href='probes/%s.html'>Open %s</a></article>" %
+        cards.append("<article class='finding-card'><h3>%s</h3><p class='muted'>%s</p><p>%s</p><p>%s</p><a class='finding-link' href='probes/%s.html' aria-label='View %s'>View →</a></article>" %
                      (_e(_finding_title(probe, per_model)), _e(probe.get("short", "")), _e(_top_finding_sentence(probe, per_model)), _model_pills(chosen_models),
                       _e(probe["id"]), _e(probe["id"])))
         family_counts[probe.get("family")] += 1
@@ -629,74 +654,146 @@ def _scorer_section(config, records, models, data_dir):
 
 
 def _dashboard_bar(config, active="results", prefix=""):
-    models = " · ".join(m.get("id", "") for m in config.get("models", []))
-    return ("<header class='dashboard-bar'><a class='brand' href='%sindex.html'>Bias Probe</a>"
-            "<nav class='tabs'><a class='%s' href='%sindex.html'>Results</a>"
-            "<a class='%s' href='%slive.html'>Live run</a></nav><span class='model-line'>%s</span></header>" %
-            (_e(prefix), "active" if active == "results" else "", _e(prefix),
-             "active" if active == "live" else "", _e(prefix), _e(models)))
+    def link(href, text, is_active=False):
+        return "<a class='nav-link%s' href='%s%s'>%s</a>" % (" active" if is_active else "", _e(prefix), href, text)
+    models = "".join("<div class='nav-model'>%s<small>%s</small></div>" % (_e(_short_model_name(m)), _e(m.get("id", "")))
+                     for m in config.get("models", []))
+    return ("<aside class='sidebar'><a class='brand' href='%sindex.html'>Bias Probe</a>"
+            "<nav class='nav-group' aria-label='Results'><div class='nav-label'>Results</div>%s%s%s%s%s</nav>"
+            "<nav class='nav-group' aria-label='Tools'><div class='nav-label'>Tools</div>%s</nav>"
+            "<div class='nav-models'><div class='nav-label'>Models tested</div>%s</div></aside>" %
+            (_e(prefix), link("index.html", "Overview", active == "results"),
+             link("index.html#comparison", "Results matrix", active == "probe"),
+             link("index.html#families", "Family summary"), link("index.html#scorer", "Scorer quality"),
+             link("index.html#run-details", "Run details &amp; methods"),
+             link("live.html", "Live run", active == "live"), models))
 
 
 def _dashboard_shell(title, body, config, active="results", mock=False, prefix=""):
     banner = "<div class='mock'>MOCK DATA — offline synthetic responses</div>" if mock else ""
-    return ("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-            "<title>%s</title><style>%s</style></head><body>%s%s<main>%s</main></body></html>" %
-            (_e(title), CSS, _dashboard_bar(config, active, prefix), banner, body))
+    # Sidebar links can target sections inside collapsed <details>.
+    opener = ("<script>function openTarget(){var t=location.hash&&document.getElementById(location.hash.slice(1));"
+              "while(t){if(t.tagName==='DETAILS')t.open=true;t=t.parentElement}}"
+              "addEventListener('hashchange',openTarget);openTarget();</script>")
+    return ("<!doctype html><html lang='en'><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+            "<title>%s</title><style>%s</style></head><body><div class='app'>%s<div class='content'>%s<main>%s</main></div></div>%s</body></html>" %
+            (_e(title), CSS, _dashboard_bar(config, active, prefix), banner, body, opener))
+
+
+def _results_subtitle(config, probes):
+    models = config.get("models", [])
+    runs = sum(int(item.get("repeats", 0)) for item in config.get("schedule", []))
+    return ("We changed one detail per question and checked whether the answer changed when it shouldn't. "
+            "%d probes · %d models · %d runs per prompt." % (len(probes), len(models), runs))
+
+
+def _tile_model_name(model):
+    return _short_model_name(model).split(" ")[0]
+
+
+def _percent_text(correct, total):
+    return "%.0f%%" % (100.0 * correct / total) if total else "n/a"
 
 
 def _kpi_section(config, probes, records, model_stats, hand_quality):
-    families = len({p.get("family") for p in probes})
-    significant = {}
-    for model in config.get("models", []):
-        significant[model["id"]] = sum(1 for item in model_stats.get(model["id"], [])
-                                        if item.get("verdict", "").startswith("BIASED") and item.get("q_value") is not None and item["q_value"] < .05)
-    labels = {m["id"]: _short_model_name(m) for m in config.get("models", [])}
-    bias_text = " · ".join("%s %d" % (labels[m["id"]], significant.get(m["id"], 0)) for m in config.get("models", []))
+    models = config.get("models", [])
+    biases = []
+    controls = []
+    control_ids = {p["id"] for p in probes if p.get("expect") == "different"}
+    for model in models:
+        stats = model_stats.get(model["id"], [])
+        found = sum(1 for item in stats if item.get("verdict", "").startswith("BIASED") and
+                    item.get("q_value") is not None and item["q_value"] < .05)
+        biases.append("%s %d" % (_tile_model_name(model), found))
+        working = sum(1 for item in stats if item.get("probe_id") in control_ids and item.get("verdict") == "CONTROL OK")
+        controls.append("%d/%d" % (working, len(control_ids)))
     rule, judge = hand_quality["rule"], hand_quality["judge"]
-    tiles = [("Probes", "%d across %d families" % (len(probes), families)),
-             ("Significant biases", "%s, q<0.05" % bias_text),
-             ("Scorer check", "rules %d/%d · judge %d/%d" % (rule["correct"], rule["total"], judge["correct"], judge["total"]))]
-    return "<div class='kpis'>%s</div>" % "".join("<div class='kpi'><small>%s</small><strong>%s</strong></div>" % (_e(a), _e(b)) for a, b in tiles)
+    tiles = [("Biases found", " · ".join(biases), "of %d probes, after multiple-test correction" % len(probes), ""),
+             ("Controls working", " · ".join(controls), "the tool detects real changes",
+              " · ".join(_tile_model_name(m) for m in models)),
+             ("Scorer vs human", "Rules %s · Judge %s" % (_percent_text(rule["correct"], rule["total"]), _percent_text(judge["correct"], judge["total"])),
+              "%d hand-checked answers" % (rule["total"] + judge["total"]), "")]
+    return "<div class='kpis'>%s</div>" % "".join(
+        "<div class='kpi'%s><small>%s</small><strong>%s</strong><span class='kpi-note'>%s</span></div>" %
+        (" title='%s'" % _e(hint) if hint else "", _e(a), _e(b), _e(c)) for a, b, c, hint in tiles)
+
+
+def _surgeon_bars(counts, total, expected):
+    """Bars for the headline card; refusals, hedges and unscorable never get a ✗."""
+    pieces = []
+    for label, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
+        if str(label) in {"refused", "hedge", "unscorable"}:
+            state, mark = "neutral", ""
+        elif str(label) == str(expected):
+            state, mark = "correct", " ✓"
+        else:
+            state, mark = "wrong", " ✗"
+        pieces.append("<span class='bar %s'><b style='width:%s%%'></b><span>%s %d/%d%s</span></span>" %
+                      (state, 100.0 * count / total, _e(label), count, total, mark))
+    return "".join(pieces) or "<span class='muted'>0/0 (n/a)</span>"
 
 
 def _surgeon_headline(config, models, probes, records):
     probe = next((p for p in probes if p.get("id") == "surgeon-riddle"), None)
     if not probe:
         return ""
-    rows = ["<tr><th>Model</th>%s</tr>" % "".join("<th>%s<br><small>expected: %s</small></th>" %
-             (_e(v["id"]), _e(v.get("answer", probe.get("answer", "n/a")))) for v in probe["variants"][:2])]
+    rows = ["<tr><th>Model</th><th>Original riddle</th><th>Prompt says: surgeon is the father</th></tr>"]
     for model in models:
         current = [r for r in records if r.get("model_requested") == model["id"]]
         stat = compute_probe_stats(current, probe, .7, config.get("permutations", 5000), config.get("seed", 12345))
-        t0_stat = compute_probe_stats(current, probe, 0.0, config.get("permutations", 5000), config.get("seed", 12345))
         cells = []
         for variant, item in zip(probe["variants"][:2], stat.get("variants", [])):
             expected = variant.get("answer", probe.get("answer"))
-            zero = next((x for x in t0_stat.get("variants", []) if x.get("variant_id") == variant.get("id")), {"counts": {}})
-            cells.append("<td>%s<br><span class='metric'>modal: %s</span><br><span class='metric'>T=0: %s</span></td>" %
-                         (_share_bars(item["counts"], item["total"], expected, headline=True), _e(item.get("modal", "n/a")),
-                          _e(_format_label_counts(zero.get("counts", {})))))
+            cells.append("<td>%s</td>" % _surgeon_bars(item["counts"], item["total"], expected))
         rows.append("<tr><td>%s</td>%s</tr>" % (_e(model.get("label", model["id"])), "".join(cells)))
     return "<div class='card surgeon-grid'><h3>Surgeon original vs inverted</h3>%s</div>" % _table("".join(rows))
 
 
+OUTCOMES = {"BIASED": ("Bias", "biased"), "BIASED (pattern)": ("Bias", "pattern"), "CONTROL MISSED": ("Bias", "control missed"),
+            "FAILED (other error)": ("Error", "failed"), "WRONG": ("Error", "wrong"),
+            "NOISY": ("Noisy", "noisy"),
+            "CONSISTENT": ("OK", "consistent"), "RESISTED": ("OK", "resisted"), "CONTROL OK": ("OK", "control")}
+OUTCOME_ORDER = ("Bias", "Error", "Noisy", "OK")
+
+
+def _outcome_chip(word, text=None, title=""):
+    title_attr = " title='%s'" % _e(title) if title else ""
+    return "<span class='verdict-badge outcome-%s'%s>%s</span>" % (word.lower(), title_attr, _e(text if text is not None else word))
+
+
+def _outcome_text(statistic):
+    """Chip, muted detail and tooltip for one verdict in the results matrix."""
+    verdict = statistic.get("verdict") or "UNSCORABLE"
+    if verdict not in OUTCOMES:
+        return "<span class='verdict-badge verdict-neutral' title='%s'>n/a</span><span class='outcome-detail'> · not scored</span>" % _e(verdict)
+    word, detail = OUTCOMES[verdict]
+    q_value = statistic.get("q_value")
+    if verdict.startswith("BIASED") and not (q_value is not None and q_value < .05):
+        detail += " · p only"
+    return "%s<span class='outcome-detail'> · %s</span>" % (_outcome_chip(word, title=verdict), _e(detail))
+
+
 def _family_section(config, model_stats):
-    family_rows = []
-    for model in config.get("models", []):
-        grouped = defaultdict(list)
+    names = {"familiar-pattern": "Familiar pattern", "social": "Social", "position": "Position", "sycophancy": "Sycophancy", "control": "Controls"}
+    models = config.get("models", [])
+    grouped = {}
+    for model in models:
         for item in model_stats[model["id"]]:
-            grouped[item["family"]].append(item)
-        for family, items in sorted(grouped.items()):
-            cats = [x["movement"]["movement"] for x in items if x.get("expect") == "same" and x.get("parse") != "int_1_10"]
-            gaps = [x["movement"]["movement"] for x in items if x.get("expect") == "same" and x.get("parse") == "int_1_10"]
-            drops = [x["accuracy_drop"] for x in items if x.get("expect") == "trap" and x.get("accuracy_drop") is not None]
-            cat = "%.3f (n=%d)" % (sum(cats) / len(cats), len(cats)) if cats else "n/a"
-            gap = "%.2f (n=%d)" % (sum(gaps) / len(gaps), len(gaps)) if gaps else "n/a"
-            drop = "%.1f pp (n=%d)" % (100 * sum(drops) / len(drops), len(drops)) if drops else "n/a"
-            family_rows.append("<tr><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td><td>%s</td></tr>" %
-                               (_e(model.get("label", model["id"])), _e(family), _verdict_chips(items), _e(cat), _e(gap), _e(drop)))
-    table = _table("<tr><th>Model</th><th>Family</th><th>Verdicts</th><th>Mean categorical movement</th><th>Mean score gap</th><th>Mean accuracy drop</th></tr>" + "".join(family_rows))
-    return "<details><summary>Family summary</summary><section id='families'><h2>Family summary</h2>%s</section></details>" % table
+            word = OUTCOMES.get(item.get("verdict"), (None,))[0]
+            counts = grouped.setdefault(item["family"], {}).setdefault(model["id"], Counter())
+            if word:
+                counts[word] += 1
+    order = [family for family in names if family in grouped] + sorted(set(grouped) - set(names))
+    rows = ["<tr><th>Family</th>%s</tr>" % "".join("<th>%s</th>" % _e(_short_model_name(m).split(" ")[0]) for m in models)]
+    for family in order:
+        cells = []
+        for model in models:
+            counts = grouped[family].get(model["id"], Counter())
+            chips = "".join(_outcome_chip(word, "%s %d" % (word, counts[word])) if counts[word]
+                            else "<span class='verdict-badge outcome-zero'>%s 0</span>" % word for word in OUTCOME_ORDER)
+            cells.append("<td><span class='outcome-counts'>%s</span></td>" % chips)
+        rows.append("<tr><td>%s</td>%s</tr>" % (_e(names.get(family, family)), "".join(cells)))
+    return "<details><summary>Family summary</summary><section id='families'><h2>Family summary</h2>%s</section></details>" % _table("".join(rows))
 
 
 def _matrix_metric_text(probe, statistic):
@@ -709,11 +806,14 @@ def _matrix_metric_text(probe, statistic):
         means = ["%s %.1f" % (_simple_variant_name(item.get("variant_id")), item["mean"])
                  for item in statistic.get("variants", []) if item.get("mean") is not None]
         return " · ".join(means) or "no numeric answers"
-    modal_labels = [item.get("modal") for item in statistic.get("variants", [])]
-    counts = ["%d/%d" % (item.get("modal_count", 0), item.get("total", 0)) for item in statistic.get("variants", [])]
-    if modal_labels and len(set(x for x in modal_labels if x is not None)) <= 1:
-        return "same answer (%s)" % " · ".join(counts)
-    return "answer changed (%s)" % " → ".join(counts)
+    parts = []
+    previous = None
+    for item in statistic.get("variants", []):
+        modal = item.get("modal")
+        count = "%d/%d" % (item.get("modal_count", 0), item.get("total", 0))
+        parts.append(count if modal is not None and modal == previous else "%s %s" % ("n/a" if modal is None else modal, count))
+        previous = modal
+    return " → ".join(parts)
 
 
 def _comparison_section(config, probes, model_stats):
@@ -733,7 +833,7 @@ def _comparison_section(config, probes, model_stats):
             href = "probes/%s.html" % probe["id"]
             legacy = "<a class='legacy-link' href='%s.html#%s' aria-label='legacy model page'></a>" % (model_slug(model["id"]), probe["id"])
             cells.append("<td><a class='badge-link' href='%s'>%s</a>%s<br><span class='metric'>%s</span></td>" %
-                         (_e(href), _verdict_text(statistic), legacy, _e(_matrix_metric_text(probe, statistic))))
+                         (_e(href), _outcome_text(statistic), legacy, _e(_matrix_metric_text(probe, statistic))))
         rows.append("<tr class='comparison-row' data-family='%s' data-significant='%s' onclick=\"location.href='probes/%s.html'\"><td><code>%s</code><br><span class='probe-why'>%s</span></td>%s</tr>" %
                     (_e(family), "true" if significant else "false", _e(probe["id"]), _e(probe["id"]), _e(probe.get("short", "")), "".join(cells)))
     chips = ["<button class='filter-chip active' data-filter='all'>All</button>"]
@@ -741,7 +841,11 @@ def _comparison_section(config, probes, model_stats):
         chips.append("<button class='filter-chip' data-filter='%s'>%s</button>" % (family, names[family]))
     chips.append("<button class='filter-chip' data-filter='significant'>Significant only</button>")
     js = "<script>document.querySelectorAll('.filter-chip').forEach(function(b){b.onclick=function(){document.querySelectorAll('.filter-chip').forEach(function(x){x.classList.remove('active')});b.classList.add('active');var f=b.dataset.filter;document.querySelectorAll('.comparison-row,.family-row').forEach(function(r){r.style.display=(f==='all'||f===r.dataset.family||(f==='significant'&&r.dataset.significant==='true'))?'':'none'})}});</script>"
-    legend = "<p class='legend'><b>Legend:</b> BIASED = answer moves with the controlled change (p&lt;0.05); WRONG = same wrong answer on both sides; NOISY = answers vary on the same prompt (modal share &lt; 80%); FAILED = wrong on the changed version but not the famous answer; RESISTED/CONSISTENT = no significant change; controls must change.</p>"
+    legend_items = (("Bias", "The answer moves with a change that shouldn't matter, or misses one it must follow."),
+                    ("Error", "Wrong, but not because of the change or the famous answer."),
+                    ("Noisy", "Answers vary on the same prompt, so the run can't separate the variants."),
+                    ("OK", "No significant movement, or a control changed as it should."))
+    legend = "<div class='legend'>%s</div>" % "".join("<div>%s<span>%s</span></div>" % (_outcome_chip(word), _e(text)) for word, text in legend_items)
     return "<section id='comparison'><h2>Results matrix</h2><div class='filter-chips'>%s</div>%s%s%s</section>" % ("".join(chips), _table("".join(rows)), legend, js)
 
 
@@ -749,21 +853,35 @@ def _probe_model_card(probe, statistic, rows, model_label):
     identity = lambda row: (row.get("key"), row.get("probe_id"), row.get("variant_id"), row.get("repeat_index"),
                             (row.get("params") or {}).get("temperature"))
     labels = {identity(row): (row.get("label_record") or {}) for row in rows}
-    variant_cells = []
+    table_rows = ["<tr><th>Variant</th><th>Expected</th><th>Answers</th><th>Accuracy</th><th>T=0</th></tr>"]
+    raw_groups = []
     for item, variant in zip(statistic.get("variants", []), probe.get("variants", [])):
         expected = variant.get("answer", probe.get("answer"))
         pattern = statistic.get("variants", [{}])[0].get("expected") if probe.get("expect") == "trap" and variant is not probe.get("variants", [])[0] else None
         t0 = Counter(labels.get(identity(row), {}).get("label", "unscorable") for row in rows
                      if row.get("variant_id") == variant.get("id") and (row.get("params") or {}).get("temperature") == 0.0)
         raw = [row for row in rows if row.get("variant_id") == variant.get("id")]
-        variant_cells.append("<td><b>%s</b><br><span class='muted'>prompt:</span> <span>%s</span><br><span class='muted'>expected:</span> %s<br>%s<br><span class='metric'>modal %s · accuracy %s<br>T=0: %s</span><details><summary>Raw responses (%d)</summary>%s</details></td>" %
-                            (_e(variant.get("id")), _e(variant.get("prompt")), _e(expected or "n/a"),
-                             _share_bars(item.get("counts", {}), item.get("total", 0), expected, pattern), _e(item.get("modal", "n/a")),
-                             _e(fraction(item.get("correct", 0), (item.get("correct", 0) or 0) + (item.get("wrong", 0) or 0)) if item.get("accuracy") is not None else "n/a"),
-                             _e(_format_label_counts(t0)), len(raw), _raw_details(raw, labels)))
-    return "<article class='card probe-model'><h3>%s %s</h3><p>%s; %s</p>%s</article>" % (
-        _e(model_label), _verdict_text(statistic), _metric_text(probe, statistic), _p_text(probe, statistic),
-        _table("<tr>%s</tr>" % "".join(variant_cells), "variant-table"))
+        accuracy = fraction(item.get("correct", 0), (item.get("correct", 0) or 0) + (item.get("wrong", 0) or 0)) if item.get("accuracy") is not None else "n/a"
+        table_rows.append("<tr><td class='variant-name'>%s</td><td>%s</td><td class='dist'>%s</td><td>%s</td><td>%s</td></tr>" %
+                          (_e(variant.get("id")), _e(expected or "n/a"),
+                           _share_bars(item.get("counts", {}), item.get("total", 0), expected, pattern),
+                           _e(accuracy), _format_label_counts(t0)))
+        raw_groups.append("<details class='raw-group'><summary>Raw responses · %s (%d)</summary>%s</details>" %
+                          (_e(variant.get("id")), len(raw), _raw_details(raw, labels)))
+    return ("<article class='card probe-model'><div class='probe-model-head'><h3>%s</h3>%s</div>"
+            "<div class='stats'><p class='stat-line'>%s</p><p class='stat-line'>%s</p></div>%s%s</article>" %
+            (_e(model_label), _verdict_text(statistic), _metric_text(probe, statistic), _p_text(probe, statistic),
+             _table("".join(table_rows), "result-table"), "".join(raw_groups)))
+
+
+def _prompt_block(probe):
+    items = []
+    for variant in probe.get("variants", []):
+        expected = variant.get("answer", probe.get("answer"))
+        expected_text = "<span>expected: %s</span>" % _e(expected) if expected else ""
+        items.append("<div class='prompt'><div class='prompt-head'>%s%s</div><p>%s</p></div>" %
+                     (_e(variant.get("id")), expected_text, _e(variant.get("prompt"))))
+    return "<section class='prompts'><h2>Prompts</h2><div class='prompt-grid'>%s</div></section>" % "".join(items)
 
 
 def render_probe_result(config, probe, model_results, mock=False):
@@ -781,7 +899,7 @@ def render_probe_result(config, probe, model_results, mock=False):
                          "timestamp_utc": raw.get("timestamp"), "provider_returned": raw.get("provider"),
                          "_file": raw.get("file"), "_line": raw.get("line"), "response_text": raw.get("text", "")})
         cards.append(_probe_model_card(probe, data["stat"], rows, data.get("label", model["id"])))
-    return "<div class='probe-model-grid'>%s</div>" % "".join(cards)
+    return "%s<div class='probe-model-grid'>%s</div>" % (_prompt_block(probe), "".join(cards))
 
 
 def _probe_dashboard_page(config, probe, model_stats, records, output_dir, mock):
@@ -798,11 +916,13 @@ def _probe_dashboard_page(config, probe, model_stats, records, output_dir, mock)
                                                 "provider": row.get("provider_returned"), "file": row.get("_file"),
                                                 "line": row.get("_line"), "text": row.get("response_text", "")}
                                                for row in model_rows]}
-    first_stat = next(x for x in model_stats[config["models"][0]["id"]] if x["probe_id"] == probe["id"])
-    body = "<h1>%s</h1><p class='muted'>%s</p><div class='card'><p>%s</p><p>%s · %s</p></div>%s" % (
-        _e(probe["id"]), _e(probe.get("family", "")), _e(probe.get("why", "")), _e(probe.get("expect", "")),
-        _e(_metric_text(probe, first_stat)), render_probe_result(config, probe, result_models, mock))
-    return _dashboard_shell(probe["id"], body, config, "results", mock, "../")
+    short = "<p class='subtitle'>%s</p>" % _e(probe["short"]) if probe.get("short") else ""
+    body = ("<div class='page-head'><a class='crumb' href='../index.html#comparison'>← Results matrix</a><h1>%s</h1>%s"
+            "<div class='tags'><span class='tag'>%s</span><span class='tag'>expect: %s</span></div></div>"
+            "<p>%s</p>%s" %
+            (_e(probe["id"]), short, _e(probe.get("family", "")), _e(probe.get("expect", "")), _e(probe.get("why", "")),
+             render_probe_result(config, probe, result_models, mock)))
+    return _dashboard_shell(probe["id"], body, config, "probe", mock, "../")
 
 
 def _json_script(identifier, payload):
@@ -831,20 +951,20 @@ var example=JSON.parse(document.getElementById("example-data").textContent), def
 function input(className, placeholder, value){var node=document.createElement("input");node.className=className;node.placeholder=placeholder;node.value=value == null ? "" : String(value);return node}
 function row(value){var v=value || {}, d=document.createElement("div");d.className="variant-form";var id=input("vid","variant id",v.id), prompt=document.createElement("textarea"), answer=input("va","expected answer",v.answer), map=input("vm","A=29, B=21","");prompt.className="vp";prompt.placeholder="prompt";prompt.value=v.prompt || "";map.value=Object.keys(v.map || {}).map(function(k){return k+"="+v.map[k]}).join(", ");var remove=document.createElement("button");remove.type="button";remove.className="button remove";remove.textContent="Remove";remove.onclick=function(){d.remove()};d.append(id,prompt,answer,map,remove);variants.appendChild(d)}
 function parseMap(value){var output={};value.split(",").forEach(function(part){var pair=part.split("=");if(pair.length===2)output[pair[0].trim()]=pair.slice(1).join("=").trim()});return output}
-function setProbe(probe, id){baseProbe=JSON.parse(JSON.stringify(probe));var selectedId=id == null ? probe.id : id;probeSelect.value=selectedId;customProbeId.hidden=selectedId !== "__custom__";if(selectedId === "__custom__")customProbeId.value=probe.id || "";document.getElementById("family").value=probe.family || "familiar-pattern";document.getElementById("expect").value=probe.expect || "same";document.getElementById("parse").value=probe.parse || "";document.getElementById("labels").value=(probe.labels || []).join(", ");document.getElementById("why").value=probe.why || "";variants.replaceChildren();(probe.variants || []).forEach(row)}
+function setProbe(probe, id){baseProbe=JSON.parse(JSON.stringify(probe));var selectedId=id == null ? probe.id : id;probeSelect.value=selectedId;customProbeId.hidden=selectedId !== "__custom__";customProbeId.required=selectedId === "__custom__";if(selectedId === "__custom__")customProbeId.value=probe.id || "";document.getElementById("family").value=probe.family || "familiar-pattern";document.getElementById("expect").value=probe.expect || "same";document.getElementById("parse").value=probe.parse || "";document.getElementById("labels").value=(probe.labels || []).join(", ");document.getElementById("why").value=probe.why || "";variants.replaceChildren();(probe.variants || []).forEach(row)}
 function selectedProbeId(){return probeSelect.value === "__custom__" ? customProbeId.value.trim() : probeSelect.value}
 function build(){var list=[];variants.querySelectorAll(".variant-form").forEach(function(d){var v={id:d.querySelector(".vid").value,prompt:d.querySelector(".vp").value}, answer=d.querySelector(".va").value, map=parseMap(d.querySelector(".vm").value);if(answer)v.answer=answer;if(Object.keys(map).length)v.map=map;list.push(v)});var probe=Object.assign({},baseProbe,{id:selectedProbeId(),family:document.getElementById("family").value,expect:document.getElementById("expect").value,labels:document.getElementById("labels").value.split(",").map(function(x){return x.trim()}).filter(Boolean),why:document.getElementById("why").value,variants:list});var parse=document.getElementById("parse").value;if(parse)probe.parse=parse;else delete probe.parse;var schedule=[];document.querySelectorAll(".schedule-row").forEach(function(d){var rawTemperature=d.querySelector(".st").value.trim(),rawRepeats=d.querySelector(".sr").value.trim();schedule.push({temperature:rawTemperature === "" ? null : Number(rawTemperature),repeats:rawRepeats === "" ? null : Number(rawRepeats)})});return {probe:probe,models:Array.from(document.querySelectorAll("input[name=model]:checked")).map(function(x){return x.value}),schedule:schedule}}
 function text(tag, value){var node=document.createElement(tag);node.textContent=value;return node}
 function render(data){result.replaceChildren(text("h2","Result"));if(data.html){var block=document.createElement("div");block.innerHTML=data.html;result.appendChild(block)}var save=document.createElement("button");save.className="button";save.textContent="Save to probes/custom.json";save.onclick=function(){fetch("/api/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({probe:data.probe})}).then(function(x){return x.json()}).then(function(x){alert(x.ok ? "Saved" : x.error)})};result.appendChild(save)}
 function disableForm(){form.querySelectorAll("input,select,textarea,button").forEach(function(node){node.disabled=true})}
-document.getElementById("add-variant").onclick=function(){row()};document.getElementById("example").onclick=function(){setProbe(example,"demo-surgeon-riddle")};probeSelect.onchange=function(){var selected=probeCatalog.find(function(item){return item.id===probeSelect.value});if(selected)setProbe(selected,selected.id);else if(probeSelect.value === "__custom__"){baseProbe={};customProbeId.hidden=false;customProbeId.focus()}else{baseProbe={};customProbeId.hidden=true}};
+document.getElementById("add-variant").onclick=function(){row()};document.getElementById("example").onclick=function(){setProbe(Object.assign({},example,{id:"demo-surgeon-riddle"}),"__custom__")};probeSelect.onchange=function(){var selected=probeCatalog.find(function(item){return item.id===probeSelect.value});if(selected)setProbe(selected,selected.id);else if(probeSelect.value === "__custom__"){baseProbe={};customProbeId.hidden=false;customProbeId.required=true;customProbeId.focus()}else{baseProbe={};customProbeId.hidden=true;customProbeId.required=false}};
 form.onsubmit=function(event){event.preventDefault();var payload=build();fetch("/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(function(x){return x.json()}).then(function(x){if(x.error){result.replaceChildren(text("p",x.error));return}var id=x.job_id,timer=setInterval(function(){fetch("/api/jobs/"+id).then(function(y){return y.json()}).then(function(job){progress.textContent="Calls "+job.done+"/"+job.total+" · errors "+job.errors+" · spend $"+Number(job.spend || 0).toFixed(4);if(job.total)document.querySelector(".progress-fill").style.width=Math.min(100,100*job.done/job.total)+"%";if(job.status==="finished"){clearInterval(timer);render(job.result)}if(job.status==="error"){clearInterval(timer);result.replaceChildren(text("p",job.error))}})},1000)}).catch(function(error){result.replaceChildren(text("p",String(error)))})};
 document.getElementById("schedule").replaceChildren.apply(document.getElementById("schedule"),defaultSchedule.map(function(item){var d=document.createElement("div"),temperature=input("st","",item.temperature),repeats=input("sr","",item.repeats);d.className="schedule-row form-grid";temperature.type="number";temperature.step="0.1";repeats.type="number";repeats.min="1";var t=document.createElement("label"),r=document.createElement("label");t.append("Temperature",temperature);r.append("Repeats",repeats);d.append(t,r);return d}));
 fetch("/api/health").catch(function(){disableForm()});
 })();
     </script>"""
     body = (_json_script("example-data", example_probe) + _json_script("config-data", config.get("schedule", [])) + _json_script("probe-data", probe_catalog) +
-            "<h1>Live run</h1>"
+            "<div class='page-head'><h1>Live run</h1><p class='subtitle'>Type a probe pair and watch it run against the configured models.</p></div>"
             "<form id='live-form' class='card'><div class='form-grid'><label>Probe name<select id='pid' required>%s</select><input id='custom-pid' class='custom-probe-id' placeholder='custom probe id' hidden></label><label>Family<select id='family'>%s</select></label><label>Expect<select id='expect'><option>same</option><option>different</option><option>trap</option></select></label><label>Parse<select id='parse'>%s</select></label><label>Labels<input id='labels' placeholder='mother,father,other' required></label><label>Why<textarea id='why'></textarea></label></div><h3>Variants</h3><div id='variants'></div><button type='button' class='button' id='add-variant'>Add variant</button><button type='button' class='button' id='example'>Load example</button><h3>Models</h3><div class='form-grid'>%s</div><h3>Schedule</h3><div id='schedule'></div><p id='progress'>~N calls</p><div class='progress-track'><div class='progress-fill'></div></div><p><button class='button primary' type='submit'>Run</button></p></form><div id='live-result'></div>%s" % (probe_options, family_options, parse_options, model_options, script))
     return _dashboard_shell("Live run", body, config, "live", False, "")
 
@@ -871,13 +991,13 @@ def build_report(config, probes, data_dir, output_dir="reports", mock=False):
             surgeon_stats[model["id"]] = compute_probe_stats(current, surgeon_probe, .7, config.get("permutations", 5000), config.get("seed", 12345))
     key = _key_finding_section(config, models, surgeon_stats, probes, model_stats, records)
     run = "<details><summary>Run details &amp; methods</summary><section id='run-details'><h2>Run details</h2><p>Schedule: %s</p>" % _e(_format_schedule(config.get("schedule", [])))
-    run += "<p>%s</p>" % _e(_mde_sentence(config))
+    run += "<p>%s</p><p>%s</p>" % (_e(LIMITS_SENTENCE), _mde_sentence(config))
     for model in models:
         run += _model_header(model, inventory[model["id"]], records, config, summary)
     run += _methods_section(config) + "</section></details>"
     scorer = "<details id='scorer'><summary>Scorer quality</summary>" + _scorer_section(config, records, models, data_dir) + "</details>"
-    body = ("<h1>Bias Probe</h1><p class='subtitle'>%s</p>%s%s%s%s%s" %
-            (_e(LIMITS_SENTENCE), _kpi_section(config, probes, records, model_stats, hand_quality), key,
+    body = ("<div class='page-head'><h1>Results</h1><p class='subtitle'>%s</p></div>%s%s%s%s%s" %
+            (_e(_results_subtitle(config, probes)), _kpi_section(config, probes, records, model_stats, hand_quality), key,
              _comparison_section(config, probes, model_stats), _family_section(config, model_stats), scorer + run))
     (output_dir / "index.html").write_text(_dashboard_shell("Bias Probe results", body, config, "results", mock), encoding="utf-8")
     for probe in probes:
