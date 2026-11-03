@@ -72,7 +72,8 @@ def _call(task, client, store, run_id, provider, seed, max_attempts=6):
             "attempts": attempts_made, "mock": isinstance(getattr(client, "__class__", None), type) and client.__class__.__name__ == "MockClient"}
 
 
-def run(config, probes, client, data_dir, model_ids=None, probe_ids=None, dry_run=False):
+def run(config, probes, client, data_dir, model_ids=None, probe_ids=None, dry_run=False,
+        progress_callback=None):
     selected_models = [m for m in config["models"] if not model_ids or m["id"] in model_ids]
     selected_probes = [p for p in probes if not probe_ids or p["id"] in probe_ids]
     tasks = list(build_tasks(selected_models, selected_probes, config["schedule"], config["max_tokens"]))
@@ -120,6 +121,9 @@ def run(config, probes, client, data_dir, model_ids=None, probe_ids=None, dry_ru
                     errors += record["status"] == "error"
                     spend += float(record.get("cost_usd") or 0.0)
                     total += 1
+                    if progress_callback:
+                        progress_callback({"done": total, "total": planned, "skipped": skipped,
+                                           "errors": errors, "spend": spend})
                     if total % 25 == 0:
                         print("Progress: done=%d skipped=%d errors=%d spend=$%.4f" % (total, skipped, errors, spend))
                     if next_index < len(pending) and (not cap or spend < cap):

@@ -37,6 +37,8 @@ def _files(root):
                 path.name.startswith("~$") or path.suffix.lower() == ".docx" or
                 path.name == ".env" or "data_mock" in relative.parts):
             continue
+        if "data_live" in relative.parts:
+            continue
         filtered.append(path)
     return filtered
 

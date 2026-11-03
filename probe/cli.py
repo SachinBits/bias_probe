@@ -15,6 +15,7 @@ from .config import load_config, model_slug
 from .judge import Judge
 from .runner import run
 from .report import build_report
+from .server import create_server
 from .scorer import JUDGE_PROMPT_VERSION, SCORER_VERSION, contains_unnegated_label, rule_score, score_response
 from .store import JsonlStore
 
@@ -46,6 +47,9 @@ def _parser():
     sp.add_argument("--data-dir")
     sp = sub.add_parser("add")
     sp.add_argument("--file")
+    sp = sub.add_parser("serve")
+    sp.add_argument("--port", type=int, default=8000)
+    sp.add_argument("--mock", action="store_true")
     return p
 
 
@@ -458,6 +462,16 @@ def main(argv=None):
         return
     if args.command == "add":
         add_probe(args)
+        return
+    if args.command == "serve":
+        server = create_server(config, probes, port=args.port, mock=args.mock)
+        print("Bias Probe dashboard: http://%s:%d/" % (server.server_address[0], server.server_address[1]))
+        try:
+            server.serve_forever()
+        except KeyboardInterrupt:
+            pass
+        finally:
+            server.server_close()
         return
     if args.command == "report":
         data_dir = _data_dir(args)

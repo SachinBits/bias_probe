@@ -90,6 +90,23 @@ probe with:
 python3 -m probe all --probes YOUR_PROBE_ID --mock
 ```
 
+## Live run
+
+The two-page dashboard is static until a local server is started. Build the
+offline report, then run:
+
+```bash
+python3 -m probe report
+python3 -m probe serve
+```
+
+Open `http://127.0.0.1:8000/` and use the **Live run** tab. The browser sends
+probe definitions and run settings to the localhost server; the API key is
+read only by the server and is never sent to the browser. Each live job uses
+the normal cache, retry policy, scorer and judge cache, with a maximum of 200
+calls and a $0.10 per-job response spend cap. For an offline smoke test use
+`python3 -m probe serve --mock`.
+
 ## The 401 key incident
 
 The shared OpenRouter key from the brief was revoked server-side around 11:20.

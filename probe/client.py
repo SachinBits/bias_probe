@@ -72,6 +72,8 @@ class OpenRouterClient:
                 body = exc.read(300).decode("utf-8", errors="replace")
             except Exception:
                 body = "<response body unavailable>"
+            finally:
+                exc.close()
             body = body.replace(self.api_key, "[REDACTED]")
             message = "HTTP %s: %s" % (exc.code, body[:300])
             raise ClientError(message, retryable, retry_after) from exc
