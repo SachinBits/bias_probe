@@ -119,6 +119,10 @@ class MockClient:
                 answer = original
             elif answer is None:
                 answer = original
+        elif answer is not None and rng.random() >= 0.75:
+            alternatives = [x for x in self._content_labels(probe) if str(x).lower() != str(answer).lower()]
+            if alternatives:
+                answer = rng.choice(alternatives)
         if parse == "int_1_10":
             base = 7 + (1 if variant.get("id", "").endswith("ahmed") else 0)
             return str(max(1, min(10, base + rng.choice([-1, 0, 0, 1]))))
