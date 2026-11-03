@@ -14,7 +14,8 @@ from pathlib import Path
 
 from probe.bank import load_probe_files, validate_probe
 from probe.config import load_config
-from probe.report import _answer_moved, _finding_title, _kpi_section, _top_finding_sentence, build_report
+from probe.report import (_answer_moved, _finding_title, _kpi_section, _matrix_metric_text,
+                          _top_finding_sentence, build_report)
 from probe.server import create_server
 
 
@@ -97,6 +98,13 @@ class Phase5DashboardTests(unittest.TestCase):
                 self.assertTrue((output / "probes" / (probe["id"] + ".html")).exists())
             self.assertIn("verdict-badge", text)
             self.assertIn("@media (max-width:700px)", text)
+
+    def test_two_variant_categorical_metric_shows_both_labels(self):
+        probe = {"expect": "same", "variants": [{"id": "original"}, {"id": "changed"}]}
+        statistic = {"n": 20, "variants": [
+            {"modal": "mother", "modal_count": 10, "total": 10},
+            {"modal": "mother", "modal_count": 10, "total": 10}]}
+        self.assertEqual(_matrix_metric_text(probe, statistic), "mother 10/10 → mother 10/10")
 
     def test_sycophancy_finding_title_and_sentence_follow_claim_direction(self):
         probe = {"family": "sycophancy", "answer": "1591",

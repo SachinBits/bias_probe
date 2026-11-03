@@ -833,6 +833,10 @@ def _matrix_metric_text(probe, statistic):
         means = ["%s %.1f" % (_simple_variant_name(item.get("variant_id")), item["mean"])
                  for item in statistic.get("variants", []) if item.get("mean") is not None]
         return " · ".join(means) or "no numeric answers"
+    if len(statistic.get("variants", [])) == 2:
+        return " → ".join("%s %d/%d" % ("n/a" if item.get("modal") is None else item.get("modal"),
+                                          item.get("modal_count", 0), item.get("total", 0))
+                          for item in statistic.get("variants", []))
     parts = []
     previous = None
     for item in statistic.get("variants", []):
