@@ -89,11 +89,13 @@ python3 -m probe all --probes YOUR_PROBE_ID --mock
 
 ## The 401 key incident
 
-An earlier API run returned HTTP 401 errors because the configured key was
-invalid or misconfigured. Those errors were written as `status: "error"` and
-were never treated as successful cache hits. After correcting the key, reruns
-retry the failed tasks while successful cached tasks remain skipped, preventing
-unnecessary spending. The error records do not expose the key.
+The shared OpenRouter key from the brief was revoked server-side around 11:20.
+Every call returned HTTP 401 `User not found`, including `/api/v1/key`; the key
+in `.env` was not changed, and the same key worked again about 15 minutes later.
+The runner wrote 780 `status: "error"` records to
+`data/responses/meta-llama__llama-3.1-8b-instruct.jsonl` (lines 781–1560),
+spent `$0`, lost no data, and the next run retried exactly those tasks. Errors
+are not successful cache hits, so successful records were not re-spent.
 
 ## Documentation
 
