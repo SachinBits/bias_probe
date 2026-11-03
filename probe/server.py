@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -19,6 +20,7 @@ from .bank import validate_probe
 from .client import LazyOpenRouterClient, MockClient
 from .config import model_slug
 from .runner import run
+from .report import render_probe_result
 from .scorer import score_response
 from .stats import aggregate_model_stats, load_analysis_records
 
@@ -43,8 +45,7 @@ class DashboardState:
         selected = [m for m in self.config.get("models", []) if m["id"] in model_ids]
         if not selected:
             raise ValueError("at least one configured model is required")
-        if not schedule or any(int(item.get("repeats", 0)) < 1 for item in schedule):
-            raise ValueError("schedule must contain positive repeats")
+        schedule = _validate_schedule(schedule)
         total = len(selected) * len(probe["variants"]) * sum(int(x["repeats"]) for x in schedule)
         if total > 200:
             raise ValueError("job exceeds the 200-call maximum")
@@ -83,10 +84,12 @@ class DashboardState:
                                    models=",".join(m["id"] for m in selected))
             score_models(args, config, self.probes + [probe], client)
             records, _summary = load_analysis_records(config, self.probes + [probe], self.data_dir)
+            analysis_temperature = next((item["temperature"] for item in schedule if item["temperature"] == 0.7),
+                                        schedule[0]["temperature"])
             compact = {"probe": probe, "models": {}}
             for model in selected:
                 model_records = [r for r in records if r.get("model_requested") == model["id"]]
-                stats = aggregate_model_stats(model_records, [probe], config, 0.7)[0]
+                stats = aggregate_model_stats(model_records, [probe], config, analysis_temperature)[0]
                 label_lookup = {}
                 for row in model_records:
                     identity = (row.get("key"), row.get("probe_id"), row.get("variant_id"),
@@ -97,13 +100,14 @@ class DashboardState:
                     identity = (row.get("key"), row.get("probe_id"), row.get("variant_id"),
                                 row.get("repeat_index"), (row.get("params") or {}).get("temperature"))
                     label = label_lookup.get(identity, {})
-                    raw.append({"variant_id": row.get("variant_id"), "label": label.get("label", "unscorable"),
+                    raw.append({"key": row.get("key"), "variant_id": row.get("variant_id"), "label": label.get("label", "unscorable"),
                                 "source": label.get("source", "none"), "temperature": (row.get("params") or {}).get("temperature"),
                                 "repeat_index": row.get("repeat_index"), "timestamp": row.get("timestamp_utc"),
                                 "provider": row.get("provider_returned"), "file": row.get("_file"),
                                 "line": row.get("_line"), "text": row.get("response_text", "")})
                 compact["models"][model["id"]] = {"label": model.get("label", model["id"]),
                                                     "stat": stats, "raw": raw}
+            compact["html"] = render_probe_result(config, probe, compact["models"], self.mock)
             with self.lock:
                 item = self.jobs[job_id]
                 item.update(status="finished", done=run_result.get("written", 0),
@@ -112,6 +116,24 @@ class DashboardState:
         except Exception as exc:
             with self.lock:
                 self.jobs[job_id].update(status="error", error=str(exc))
+
+
+def _validate_schedule(schedule):
+    if not isinstance(schedule, list) or not schedule:
+        raise ValueError("schedule must be a non-empty list")
+    validated = []
+    for index, item in enumerate(schedule):
+        if not isinstance(item, dict):
+            raise ValueError("schedule[%d] must be an object" % index)
+        temperature = item.get("temperature")
+        if (isinstance(temperature, bool) or not isinstance(temperature, (int, float)) or
+                not math.isfinite(float(temperature)) or not 0 <= float(temperature) <= 2):
+            raise ValueError("schedule[%d].temperature must be a number in [0, 2]" % index)
+        repeats = item.get("repeats")
+        if isinstance(repeats, bool) or not isinstance(repeats, int) or repeats < 1:
+            raise ValueError("schedule[%d].repeats must be a positive integer" % index)
+        validated.append({"temperature": float(temperature), "repeats": repeats})
+    return validated
 
 
 def _json(handler, payload, status=200):
@@ -177,7 +199,7 @@ def make_handler(state):
                 if path == "/api/run":
                     probe = validate_probe(payload.get("probe"), "request")
                     models = payload.get("models") or [m["id"] for m in state.config.get("models", [])]
-                    schedule = payload.get("schedule") or state.config.get("schedule", [])
+                    schedule = payload["schedule"] if "schedule" in payload else state.config.get("schedule", [])
                     job_id = state.start_run(probe, models, schedule)
                     _json(self, {"job_id": job_id}, 202)
                     return

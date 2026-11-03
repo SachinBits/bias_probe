@@ -194,6 +194,7 @@ code { overflow-wrap:anywhere; } .grid { display:grid; grid-template-columns:rep
 .probe-model-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:1rem; } .probe-model { min-width:0; }
 .result-bar { min-width:120px; } .api-error { border-left:4px solid #b42318; }
 .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:.75rem; } label { display:block; font-weight:600; } input, select, textarea { width:100%; font:inherit; color:var(--fg); background:var(--bg); border:1px solid var(--line); border-radius:6px; padding:.45rem; } textarea { min-height:5rem; resize:vertical; }
+.model-option { display:flex; align-items:center; gap:.45rem; } .model-option input { width:auto; margin:0; }
 .variant-form { display:grid; grid-template-columns:8rem minmax(0,2fr) minmax(0,1fr) minmax(0,1fr) auto; gap:.5rem; align-items:start; margin:.5rem 0; } button { font:inherit; cursor:pointer; } .button { border:1px solid var(--line); background:var(--card); color:var(--fg); border-radius:6px; padding:.45rem .7rem; } .button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
 .progress-track { height:.7rem; background:var(--line); border-radius:999px; overflow:hidden; } .progress-fill { height:100%; width:0; background:var(--accent); transition:width .2s; }
 .top-nav { margin:.75rem 0 1.5rem; font-size:.9rem; } .top-nav a { white-space:nowrap; }
@@ -242,10 +243,12 @@ def _metric_text(probe, statistic):
 
 
 def _p_text(probe, statistic):
+    def sig3(value):
+        return "n/a" if value is None else "%.3g" % float(value)
     if probe.get("expect") == "trap" and statistic.get("fisher_p") is not None:
-        return "p(permutation)=%.4g; p(Fisher)=%.4g; q=%.4g" % (statistic["p_value"],
-                                                                  statistic["fisher_p"], statistic["q_value"])
-    return "p=%.4g; q=%.4g" % (statistic["verdict_p"], statistic["q_value"])
+        return "p(permutation)=%s; p(Fisher)=%s; q=%s" % (sig3(statistic.get("p_value")),
+                                                          sig3(statistic.get("fisher_p")), sig3(statistic.get("q_value")))
+    return "p=%s; q=%s" % (sig3(statistic.get("verdict_p")), sig3(statistic.get("q_value")))
 
 
 def _mde_sentence(config):
@@ -399,33 +402,25 @@ def _simple_variant_name(value):
 
 
 def _top_finding_sentence(probe, model_stats):
-    models = list(model_stats)
-    significant_models = [model for model in models if model_stats[model].get("q_value") is not None and model_stats[model]["q_value"] < .05]
-    names = [_short_model_name(model) for model in significant_models]
-    who = "both models" if len(significant_models) == 2 else (names[0] if names else "the models")
-    statistic = model_stats[significant_models[0]] if significant_models else next(iter(model_stats.values()))
-    if probe.get("expect") == "trap":
-        original = "%d/%d" % (statistic.get("original_correct", 0), statistic.get("original_total", 0))
-        changed = "%d/%d" % (statistic.get("changed_correct", 0), statistic.get("changed_total", 0))
-        return "Answers correctly %s on the original and %s on the changed version (%s)." % (original, changed, who)
-    if probe.get("parse") == "int_1_10":
-        means = []
-        for item in statistic.get("variants", []):
-            if item.get("mean") is not None:
-                means.append("%s ~%.1f/10" % (_simple_variant_name(item.get("variant_id")), item["mean"]))
-        return "Rates %s on otherwise matching prompts (%s)." % (" and ".join(means), who)
-    parts = []
-    for item in statistic.get("variants", []):
-        if item.get("modal") is not None:
-            parts.append("'%s' for %s in %s" % (item["modal"], _simple_variant_name(item.get("variant_id")),
-                                                  "%d/%d runs" % (item.get("modal_count", 0), item.get("total", 0))))
-    if probe.get("family") == "sycophancy":
-        return "Follows the user's wrong answer in %s (%s)." % (" and ".join(parts), who)
-    return "Answers %s (%s)." % (" and ".join(parts), who)
+    def detail(model_id, statistic):
+        label = _short_model_name(model_id)
+        if probe.get("expect") == "trap":
+            return "%s %d/%d → %d/%d correct" % (label, statistic.get("original_correct", 0), statistic.get("original_total", 0),
+                                                   statistic.get("changed_correct", 0), statistic.get("changed_total", 0))
+        if probe.get("parse") == "int_1_10":
+            means = ["%s %.1f" % (item.get("variant_id"), item["mean"])
+                     for item in statistic.get("variants", []) if item.get("mean") is not None]
+            return "%s: %s (mean score)" % (label, " · ".join(means))
+        answers = ["%s → %s %d/%d" % (item.get("variant_id"), item.get("modal", "n/a"),
+                                      item.get("modal_count", 0), item.get("total", 0))
+                   for item in statistic.get("variants", [])]
+        return "%s %s" % (label, ", ".join(answers))
+
+    return " · ".join(detail(model_id, statistic) for model_id, statistic in model_stats.items())
 
 
 def _top_findings(probes, models, model_stats):
-    by_probe = {probe["id"]: probe for probe in probes}
+    family_order = {"familiar-pattern": 0, "social": 1, "sycophancy": 2, "position": 3}
     findings = []
     for probe in probes:
         per_model = {}
@@ -434,15 +429,21 @@ def _top_findings(probes, models, model_stats):
             if statistic.get("verdict", "").startswith("BIASED") and statistic.get("q_value") is not None and statistic["q_value"] < .05:
                 per_model[model["id"]] = statistic
         if per_model:
-            findings.append((min(x.get("q_value", 1.0) for x in per_model.values()), probe, per_model))
-    findings.sort(key=lambda item: (item[0], item[1]["id"]))
+            both = len(per_model) == len(models)
+            findings.append((family_order.get(probe.get("family"), 99), 0 if both else 1,
+                             min(x.get("q_value", 1.0) for x in per_model.values()), probe, per_model))
+    findings.sort(key=lambda item: (item[0], item[1], item[2], item[3]["id"]))
     cards = []
     model_by_id = {model["id"]: model for model in models}
-    for _q, probe, per_model in findings[:5]:
+    family_counts = Counter()
+    for _family_rank, _both, _q, probe, per_model in findings:
+        if len(cards) >= 5 or family_counts[probe.get("family")] >= 2:
+            continue
         chosen_models = [model_by_id[model_id] for model_id in per_model]
-        cards.append("<article class='finding-card'><h3>%s</h3><p>%s</p><p>%s</p><a class='finding-link' href='probes/%s.html'>Open %s</a></article>" %
-                     (_e(_finding_title(probe)), _e(_top_finding_sentence(probe, per_model)), _model_pills(chosen_models),
+        cards.append("<article class='finding-card'><h3>%s</h3><p class='muted'>%s</p><p>%s</p><p>%s</p><a class='finding-link' href='probes/%s.html'>Open %s</a></article>" %
+                     (_e(_finding_title(probe)), _e(probe.get("short", "")), _e(_top_finding_sentence(probe, per_model)), _model_pills(chosen_models),
                       _e(probe["id"]), _e(probe["id"])))
+        family_counts[probe.get("family")] += 1
     return "<h3>Top findings</h3><div class='finding-grid'>%s</div>" % ("".join(cards) or "<p class='muted'>No q&lt;0.05 findings in this snapshot.</p>")
 
 
@@ -683,29 +684,63 @@ def _comparison_section(config, probes, model_stats):
     return "<section id='comparison'><h2>Results matrix</h2><div class='filter-chips'>%s</div>%s%s%s</section>" % ("".join(chips), _table("".join(rows)), legend, js)
 
 
-def _probe_dashboard_page(config, probe, model_stats, records, output_dir, mock):
+def _probe_model_card(probe, statistic, rows, model_label):
+    identity = lambda row: (row.get("key"), row.get("probe_id"), row.get("variant_id"), row.get("repeat_index"),
+                            (row.get("params") or {}).get("temperature"))
+    labels = {identity(row): (row.get("label_record") or {}) for row in rows}
+    variant_cells = []
+    for item, variant in zip(statistic.get("variants", []), probe.get("variants", [])):
+        expected = variant.get("answer", probe.get("answer"))
+        pattern = statistic.get("variants", [{}])[0].get("expected") if probe.get("expect") == "trap" and variant is not probe.get("variants", [])[0] else None
+        t0 = Counter(labels.get(identity(row), {}).get("label", "unscorable") for row in rows
+                     if row.get("variant_id") == variant.get("id") and (row.get("params") or {}).get("temperature") == 0.0)
+        raw = [row for row in rows if row.get("variant_id") == variant.get("id")]
+        variant_cells.append("<td><b>%s</b><br><span class='muted'>prompt:</span> <span>%s</span><br><span class='muted'>expected:</span> %s<br>%s<br><span class='metric'>modal %s · accuracy %s<br>T=0: %s</span><details><summary>Raw responses (%d)</summary>%s</details></td>" %
+                            (_e(variant.get("id")), _e(variant.get("prompt")), _e(expected or "n/a"),
+                             _share_bars(item.get("counts", {}), item.get("total", 0), expected, pattern), _e(item.get("modal", "n/a")),
+                             _e(fraction(item.get("correct", 0), (item.get("correct", 0) or 0) + (item.get("wrong", 0) or 0)) if item.get("accuracy") is not None else "n/a"),
+                             _e(_format_label_counts(t0)), len(raw), _raw_details(raw, labels)))
+    return "<article class='card probe-model'><h3>%s %s</h3><p>%s; %s</p>%s</article>" % (
+        _e(model_label), _verdict_text(statistic), _metric_text(probe, statistic), _p_text(probe, statistic),
+        _table("<tr>%s</tr>" % "".join(variant_cells), "variant-table"))
+
+
+def render_probe_result(config, probe, model_results, mock=False):
+    """Render the shared per-probe result block for static and live views."""
     cards = []
+    for model in config.get("models", []):
+        data = model_results.get(model["id"])
+        if not data:
+            continue
+        rows = []
+        for raw in data.get("raw", []):
+            rows.append({"key": raw.get("key"), "probe_id": probe["id"], "variant_id": raw.get("variant_id"),
+                         "repeat_index": raw.get("repeat_index"), "params": {"temperature": raw.get("temperature")},
+                         "label_record": {"label": raw.get("label", "unscorable"), "source": raw.get("source", "none")},
+                         "timestamp_utc": raw.get("timestamp"), "provider_returned": raw.get("provider"),
+                         "_file": raw.get("file"), "_line": raw.get("line"), "response_text": raw.get("text", "")})
+        cards.append(_probe_model_card(probe, data["stat"], rows, data.get("label", model["id"])))
+    return "<div class='probe-model-grid'>%s</div>" % "".join(cards)
+
+
+def _probe_dashboard_page(config, probe, model_stats, records, output_dir, mock):
+    result_models = {}
     for model in config.get("models", []):
         statistic = next(x for x in model_stats[model["id"]] if x["probe_id"] == probe["id"])
         model_rows = [r for r in records if r.get("model_requested") == model["id"] and r.get("probe_id") == probe["id"]]
-        identity = lambda r: (r.get("key"), r.get("probe_id"), r.get("variant_id"), r.get("repeat_index"), (r.get("params") or {}).get("temperature"))
-        lookup = {identity(r): r.get("label_record") or {} for r in model_rows}
-        variant_cells = []
-        for item, variant in zip(statistic.get("variants", []), probe.get("variants", [])):
-            expected = variant.get("answer", probe.get("answer"))
-            pattern = statistic.get("variants", [{}])[0].get("expected") if probe.get("expect") == "trap" and variant is not probe.get("variants", [])[0] else None
-            t0 = Counter(lookup.get(identity(r), {}).get("label", "unscorable") for r in model_rows
-                         if r.get("variant_id") == variant.get("id") and (r.get("params") or {}).get("temperature") == 0.0)
-            raw = [r for r in model_rows if r.get("variant_id") == variant.get("id")]
-            variant_cells.append("<td><b>%s</b><br><span class='muted'>prompt:</span> <span>%s</span><br><span class='muted'>expected:</span> %s<br>%s<br><span class='metric'>modal %s · accuracy %s<br>T=0: %s</span><details><summary>Raw responses (%d)</summary>%s</details></td>" %
-                                (_e(variant.get("id")), _e(variant.get("prompt")), _e(expected or "n/a"),
-                                 _share_bars(item.get("counts", {}), item.get("total", 0), expected, pattern), _e(item.get("modal", "n/a")),
-                                 _e(fraction(item.get("correct", 0), (item.get("correct", 0) or 0) + (item.get("wrong", 0) or 0)) if item.get("accuracy") is not None else "n/a"),
-                                 _e(_format_label_counts(t0)), len(raw), _raw_details(raw, lookup)))
-        cards.append("<article class='card probe-model'><h3>%s</h3><p>%s %s</p>%s</article>" %
-                     (_e(model.get("label", model["id"])), _verdict_text(statistic), _e(_metric_text(probe, statistic)), _table("<tr>%s</tr>" % "".join(variant_cells), "variant-table")))
-    body = "<h1>%s</h1><p class='muted'>%s</p><div class='card'><p>%s</p><p>%s · %s</p></div><div class='probe-model-grid'>%s</div>" % (
-        _e(probe["id"]), _e(probe.get("family", "")), _e(probe.get("why", "")), _e(probe.get("expect", "")), _e(_metric_text(probe, next(x for x in model_stats[config["models"][0]["id"]] if x["probe_id"] == probe["id"]))), "".join(cards))
+        result_models[model["id"]] = {"label": model.get("label", model["id"]), "stat": statistic,
+                                       "raw": [{"key": row.get("key"), "variant_id": row.get("variant_id"),
+                                                "label": (row.get("label_record") or {}).get("label", "unscorable"),
+                                                "source": (row.get("label_record") or {}).get("source", "none"),
+                                                "temperature": (row.get("params") or {}).get("temperature"),
+                                                "repeat_index": row.get("repeat_index"), "timestamp": row.get("timestamp_utc"),
+                                                "provider": row.get("provider_returned"), "file": row.get("_file"),
+                                                "line": row.get("_line"), "text": row.get("response_text", "")}
+                                               for row in model_rows]}
+    first_stat = next(x for x in model_stats[config["models"][0]["id"]] if x["probe_id"] == probe["id"])
+    body = "<h1>%s</h1><p class='muted'>%s</p><div class='card'><p>%s</p><p>%s · %s</p></div>%s" % (
+        _e(probe["id"]), _e(probe.get("family", "")), _e(probe.get("why", "")), _e(probe.get("expect", "")),
+        _e(_metric_text(probe, first_stat)), render_probe_result(config, probe, result_models, mock))
     return _dashboard_shell(probe["id"], body, config, "results", mock, "../")
 
 
@@ -715,7 +750,7 @@ def _json_script(identifier, payload):
 
 
 def _live_page(config, example_probe=None):
-    model_options = "".join("<label><input type='checkbox' name='model' value='%s' checked> %s</label>" % (_e(m["id"]), _e(m.get("label", m["id"]))) for m in config.get("models", []))
+    model_options = "".join("<label class='model-option'><input type='checkbox' name='model' value='%s' checked><span>%s</span></label>" % (_e(m["id"]), _e(m.get("label", m["id"]))) for m in config.get("models", []))
     family_options = "".join("<option value='%s'>%s</option>" % (x, x.replace("-", " ").title()) for x in ("familiar-pattern", "social", "position", "sycophancy", "control"))
     parse_options = "<option value=''>none</option><option>integer</option><option>int_1_10</option><option>amount</option><option>letter</option><option>choice_number</option>"
     example_probe = example_probe or {"id": "", "variants": [], "labels": []}
@@ -724,13 +759,13 @@ def _live_page(config, example_probe=None):
 (function(){
 var form=document.getElementById("live-form"), variants=document.getElementById("variants"), progress=document.getElementById("progress"), result=document.getElementById("live-result"), baseProbe={};
 var example=JSON.parse(document.getElementById("example-data").textContent), defaultSchedule=JSON.parse(document.getElementById("config-data").textContent);
-function input(className, placeholder, value){var node=document.createElement("input");node.className=className;node.placeholder=placeholder;node.value=value || "";return node}
+function input(className, placeholder, value){var node=document.createElement("input");node.className=className;node.placeholder=placeholder;node.value=value == null ? "" : String(value);return node}
 function row(value){var v=value || {}, d=document.createElement("div");d.className="variant-form";var id=input("vid","variant id",v.id), prompt=document.createElement("textarea"), answer=input("va","expected answer",v.answer), map=input("vm","A=29, B=21","");prompt.className="vp";prompt.placeholder="prompt";prompt.value=v.prompt || "";map.value=Object.keys(v.map || {}).map(function(k){return k+"="+v.map[k]}).join(", ");var remove=document.createElement("button");remove.type="button";remove.className="button remove";remove.textContent="Remove";remove.onclick=function(){d.remove()};d.append(id,prompt,answer,map,remove);variants.appendChild(d)}
 function parseMap(value){var output={};value.split(",").forEach(function(part){var pair=part.split("=");if(pair.length===2)output[pair[0].trim()]=pair.slice(1).join("=").trim()});return output}
 function setProbe(probe, id){baseProbe=JSON.parse(JSON.stringify(probe));document.getElementById("pid").value=id || probe.id || "";document.getElementById("family").value=probe.family || "familiar-pattern";document.getElementById("expect").value=probe.expect || "same";document.getElementById("parse").value=probe.parse || "";document.getElementById("labels").value=(probe.labels || []).join(", ");document.getElementById("why").value=probe.why || "";variants.replaceChildren();(probe.variants || []).forEach(row)}
-function build(){var list=[];variants.querySelectorAll(".variant-form").forEach(function(d){var v={id:d.querySelector(".vid").value,prompt:d.querySelector(".vp").value}, answer=d.querySelector(".va").value, map=parseMap(d.querySelector(".vm").value);if(answer)v.answer=answer;if(Object.keys(map).length)v.map=map;list.push(v)});var probe=Object.assign({},baseProbe,{id:document.getElementById("pid").value,family:document.getElementById("family").value,expect:document.getElementById("expect").value,labels:document.getElementById("labels").value.split(",").map(function(x){return x.trim()}).filter(Boolean),why:document.getElementById("why").value,variants:list});var parse=document.getElementById("parse").value;if(parse)probe.parse=parse;else delete probe.parse;var schedule=[];document.querySelectorAll(".schedule-row").forEach(function(d){schedule.push({temperature:parseFloat(d.querySelector(".st").value),repeats:parseInt(d.querySelector(".sr").value,10)})});return {probe:probe,models:Array.from(document.querySelectorAll("input[name=model]:checked")).map(function(x){return x.value}),schedule:schedule}}
+function build(){var list=[];variants.querySelectorAll(".variant-form").forEach(function(d){var v={id:d.querySelector(".vid").value,prompt:d.querySelector(".vp").value}, answer=d.querySelector(".va").value, map=parseMap(d.querySelector(".vm").value);if(answer)v.answer=answer;if(Object.keys(map).length)v.map=map;list.push(v)});var probe=Object.assign({},baseProbe,{id:document.getElementById("pid").value,family:document.getElementById("family").value,expect:document.getElementById("expect").value,labels:document.getElementById("labels").value.split(",").map(function(x){return x.trim()}).filter(Boolean),why:document.getElementById("why").value,variants:list});var parse=document.getElementById("parse").value;if(parse)probe.parse=parse;else delete probe.parse;var schedule=[];document.querySelectorAll(".schedule-row").forEach(function(d){var rawTemperature=d.querySelector(".st").value.trim(),rawRepeats=d.querySelector(".sr").value.trim();schedule.push({temperature:rawTemperature === "" ? null : Number(rawTemperature),repeats:rawRepeats === "" ? null : Number(rawRepeats)})});return {probe:probe,models:Array.from(document.querySelectorAll("input[name=model]:checked")).map(function(x){return x.value}),schedule:schedule}}
 function text(tag, value){var node=document.createElement(tag);node.textContent=value;return node}
-function render(data){result.replaceChildren(text("h2","Result"));Object.keys(data.models || {}).forEach(function(id){var model=data.models[id],stat=model.stat,card=document.createElement("article");card.className="card";card.append(text("h3",model.label || id),text("p",stat.verdict+" · p="+stat.verdict_p+" · q="+stat.q_value));stat.variants.forEach(function(v){card.append(text("p",v.variant_id+" — "+JSON.stringify(v.counts)))});(model.raw || []).forEach(function(raw){var details=document.createElement("details");details.append(text("summary",raw.label+" · "+raw.file+":"+raw.line),text("pre",raw.text));card.append(details)});result.appendChild(card)});var save=document.createElement("button");save.className="button";save.textContent="Save to probes/custom.json";save.onclick=function(){fetch("/api/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({probe:data.probe})}).then(function(x){return x.json()}).then(function(x){alert(x.ok ? "Saved" : x.error)})};result.appendChild(save)}
+function render(data){result.replaceChildren(text("h2","Result"));if(data.html){var block=document.createElement("div");block.innerHTML=data.html;result.appendChild(block)}var save=document.createElement("button");save.className="button";save.textContent="Save to probes/custom.json";save.onclick=function(){fetch("/api/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({probe:data.probe})}).then(function(x){return x.json()}).then(function(x){alert(x.ok ? "Saved" : x.error)})};result.appendChild(save)}
 function disableForm(){form.querySelectorAll("input,select,textarea,button").forEach(function(node){node.disabled=true})}
 document.getElementById("add-variant").onclick=function(){row()};document.getElementById("example").onclick=function(){setProbe(example,"demo-surgeon-riddle")};
 form.onsubmit=function(event){event.preventDefault();var payload=build();fetch("/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(function(x){return x.json()}).then(function(x){if(x.error){result.replaceChildren(text("p",x.error));return}var id=x.job_id,timer=setInterval(function(){fetch("/api/jobs/"+id).then(function(y){return y.json()}).then(function(job){progress.textContent="Calls "+job.done+"/"+job.total+" · errors "+job.errors+" · spend $"+Number(job.spend || 0).toFixed(4);if(job.total)document.querySelector(".progress-fill").style.width=Math.min(100,100*job.done/job.total)+"%";if(job.status==="finished"){clearInterval(timer);render(job.result)}if(job.status==="error"){clearInterval(timer);result.replaceChildren(text("p",job.error))}})},1000)}).catch(function(error){result.replaceChildren(text("p",String(error)))})};

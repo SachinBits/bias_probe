@@ -34,7 +34,8 @@ class Phase5DashboardTests(unittest.TestCase):
             self.assertIn("Scorer check", text)
             self.assertIn("GPT-4o-mini answers 'mother' 10/10 even when the prompt says the surgeon is the father.", text)
             self.assertIn("Top findings", text)
-            self.assertIn("Memorised riddle versus a prompt that states the answer.", text)
+            surgeon = next(p for p in self.probes if p["id"] == "surgeon-riddle")
+            self.assertIn(surgeon["short"], text)
             self.assertEqual(text.count("class='comparison-row'"), len(self.probes))
             for probe in self.probes:
                 self.assertIn("probes/%s.html" % probe["id"], text)
@@ -72,10 +73,14 @@ class Phase5DashboardTests(unittest.TestCase):
                             for kind, body in parser.items if kind == "application/json")}
             example = json_blocks["example-data"]
             bank_probe = next(p for p in self.probes if p["id"] == "surgeon-riddle")
+            live_text = (output / "live.html").read_text(encoding="utf-8")
             self.assertEqual(example["id"], bank_probe["id"])
             self.assertEqual(example["variants"], bank_probe["variants"])
             self.assertIn("demo-surgeon-riddle", "".join(body for _kind, body in parser.items))
-            self.assertNotIn("Live runs need the local server", (output / "live.html").read_text(encoding="utf-8"))
+            self.assertIn('"temperature": 0.0', live_text)
+            self.assertIn("value == null ?", live_text)
+            self.assertIn("class='model-option'", live_text)
+            self.assertNotIn("Live runs need the local server", live_text)
             node = shutil.which("node")
             if node:
                 for kind, body in parser.items:
@@ -109,6 +114,15 @@ class Phase5DashboardTests(unittest.TestCase):
 
             payload = {"probe": probe, "models": [self.config["models"][0]["id"]],
                        "schedule": [{"temperature": 0.0, "repeats": 1}]}
+            null_temperature = dict(payload)
+            null_temperature["schedule"] = [{"temperature": None, "repeats": 1}]
+            null_request = urllib.request.Request(base + "/api/run", data=json.dumps(null_temperature).encode("utf-8"),
+                                                   headers={"Content-Type": "application/json"}, method="POST")
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                urllib.request.urlopen(null_request)
+            self.assertEqual(caught.exception.code, 400)
+            self.assertIn("temperature", caught.exception.read().decode("utf-8"))
+            caught.exception.close()
             request = urllib.request.Request(base + "/api/run", data=json.dumps(payload).encode("utf-8"),
                                               headers={"Content-Type": "application/json"}, method="POST")
             job_id = json.loads(urllib.request.urlopen(request).read().decode("utf-8"))["job_id"]
@@ -120,6 +134,14 @@ class Phase5DashboardTests(unittest.TestCase):
             self.assertEqual(job["status"], "finished")
             self.assertIn("models", job["result"])
             self.assertEqual(job["errors"], 0)
+            self.assertIn("verdict-badge", job["result"]["html"])
+            self.assertIn("class='bar", job["result"]["html"])
+            self.assertIn("Raw responses", job["result"]["html"])
+            self.assertNotIn('"counts"', job["result"]["html"])
+            response_path = Path(tmp) / "data_live" / "responses" / (self.config["models"][0]["id"].replace("/", "__") + ".jsonl")
+            response_rows = [json.loads(line) for line in response_path.read_text(encoding="utf-8").splitlines()]
+            self.assertTrue(any(row["params"]["temperature"] == 0.0 and isinstance(row["params"]["temperature"], float)
+                                for row in response_rows))
 
             bad = dict(payload)
             bad["probe"] = {"id": "bad"}
