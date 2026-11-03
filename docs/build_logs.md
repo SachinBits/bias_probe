@@ -268,3 +268,9 @@ These layout and wording changes were requested on purpose. No statistics, data 
 - **Surgeon card simplified.** The headline card no longer shows T=0 answers or percentages ("mother 10/10 ✓"). T=0 results and "n/n (%)" remain on the probe pages.
 - **Four outcome words in the matrix.** Bias, Error, Noisy and OK group the exact verdict names, which remain in the muted detail text, the chip tooltip and the probe pages. Bias includes CONTROL MISSED, so a family's Bias count can exceed the "Biases found" tile, which counts only q<0.05 BIASED verdicts.
 - **Family summary reduced.** It now shows outcome counts per family and model. Mean movement, mean score gap and mean accuracy drop per family are no longer displayed; per-probe movement remains on the probe pages.
+
+## Results tiles and family table follow-up
+
+- "Biases found" now uses the same Bias mapping as the outcome chips (BIASED, BIASED (pattern), CONTROL MISSED), so the tile and the family table agree. This replaces the earlier q<0.05-only count described above.
+- The family table has an "answer moved" column per model: p<0.05 for `same` probes, one-sided Fisher p<0.05 for traps, CONTROL OK for controls. For traps this measures an accuracy drop, not whether the label changed, so a model that repeats the famous answer on both variants counts as moved.
+- `.gitignore` now covers `*.docx` and `~$*`, because the brief contains the shared API key.

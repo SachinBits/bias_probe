@@ -14,7 +14,7 @@ from pathlib import Path
 
 from probe.bank import load_probe_files, validate_probe
 from probe.config import load_config
-from probe.report import _finding_title, _top_finding_sentence, build_report
+from probe.report import _answer_moved, _finding_title, _kpi_section, _top_finding_sentence, build_report
 from probe.server import create_server
 
 
@@ -60,9 +60,10 @@ class Phase5DashboardTests(unittest.TestCase):
             self.assertNotIn("<small>Calls</small>", text)
             self.assertIn("Calls:", text)
             self.assertIn("Biases found", text)
-            self.assertIn("of 26 probes, after multiple-test correction", text)
-            self.assertIn("<strong>3/4 · 4/4</strong>", text)
-            self.assertIn("the tool detects real changes", text)
+            self.assertIn("<strong>GPT-4o-mini 7 · Llama 8</strong>", text)
+            self.assertIn("of 26 probes · includes 1 control GPT-4o-mini ignored", text)
+            self.assertIn("<strong>GPT-4o-mini 3/4 · Llama 4/4</strong>", text)
+            self.assertIn("GPT-4o-mini ignored &#x27;the surgeon is the father&#x27;", text)
             self.assertIn("Rules 100% · Judge 79%", text)
             self.assertIn("60 hand-checked answers", text)
             self.assertIn("26 probes · 2 models · 13 runs per prompt.", text)
@@ -79,7 +80,9 @@ class Phase5DashboardTests(unittest.TestCase):
             self.assertIn("<span class='verdict-badge outcome-bias' title='BIASED (pattern)'>Bias</span><span class='outcome-detail'> · pattern</span>", text)
             self.assertIn("<span class='verdict-badge outcome-ok' title='CONTROL OK'>OK</span><span class='outcome-detail'> · control</span>", text)
             families = text[text.index("<section id='families'"):text.index("</section>", text.index("<section id='families'"))]
-            self.assertIn("<th>GPT-4o-mini</th><th>Llama</th>", families)
+            self.assertIn("<th>GPT-4o-mini</th><th>GPT-4o-mini: answer moved</th><th>Llama</th><th>Llama: answer moved</th>", families)
+            self.assertRegex(families, r"<td class='answer-moved'>\d+ of 10 probes</td>")
+            self.assertIn("Bias 6", families)
             self.assertIn("Familiar pattern", families)
             self.assertNotIn("Mean categorical movement", families)
             self.assertIn("min-height:100%", text)
@@ -114,6 +117,27 @@ class Phase5DashboardTests(unittest.TestCase):
         self.assertIn("user-wrong 1581 → 1581 ×6", _top_finding_sentence(probe, {model: higher}))
         self.assertEqual(_finding_title(probe, {model: lower}), "Answer shifts when the user states an opinion (away from the claim)")
         self.assertIn("neutral 1581 ×8 (wrong on its own)", _top_finding_sentence(probe, {model: lower}))
+
+    def test_answer_moved_uses_each_probe_types_test(self):
+        self.assertTrue(_answer_moved({"expect": "same", "verdict_p": .01}))
+        self.assertFalse(_answer_moved({"expect": "same", "verdict_p": .2}))
+        self.assertTrue(_answer_moved({"expect": "trap", "fisher_p": .01, "verdict_p": .01}))
+        self.assertFalse(_answer_moved({"expect": "trap", "fisher_p": 1.0, "p_value": .0002, "verdict_p": 1.0}))
+        self.assertTrue(_answer_moved({"expect": "different", "verdict": "CONTROL OK"}))
+        self.assertFalse(_answer_moved({"expect": "different", "verdict": "CONTROL MISSED", "verdict_p": .01}))
+
+    def test_control_captions_use_short_text_and_handle_no_misses(self):
+        config = {"models": [{"id": "a/gpt-4o-mini", "label": "x"}, {"id": "b/llama-3.1-8b", "label": "y"}]}
+        probes = [{"id": "dish", "expect": "different", "short": "Dish from Japan vs. Italy"}]
+        quality = {"rule": {"correct": 1, "total": 1}, "judge": {"correct": 0, "total": 0}}
+        missed = _kpi_section(config, probes, [], {"a/gpt-4o-mini": [{"probe_id": "dish", "verdict": "CONTROL MISSED"}],
+                                                    "b/llama-3.1-8b": [{"probe_id": "dish", "verdict": "CONTROL OK"}]}, quality)
+        self.assertIn("ignored &#x27;Dish from Japan vs. Italy&#x27;", missed)
+        self.assertIn("of 1 probes · includes 1 control", missed)
+        clean = _kpi_section(config, probes, [], {"a/gpt-4o-mini": [{"probe_id": "dish", "verdict": "CONTROL OK"}],
+                                                   "b/llama-3.1-8b": [{"probe_id": "dish", "verdict": "CONTROL OK"}]}, quality)
+        self.assertIn("the tool detects real changes", clean)
+        self.assertNotIn("includes", clean)
 
     def test_load_example_produces_submittable_form(self):
         """Run live.html's real script against a small fake DOM, then click Load example and Run."""

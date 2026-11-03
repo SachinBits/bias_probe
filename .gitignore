@@ -4,3 +4,5 @@ __pycache__/
 data_mock/
 data_live/
 *_challenge-4.zip
+*.docx
+~$*

@@ -207,7 +207,7 @@ th { background:var(--head); font-size:12.5px; font-weight:600; color:var(--fg);
 .finding-card h3 { grid-column:1; margin:0; font-size:13.5px; } .finding-card > p { margin:0; } .finding-card > p.muted { grid-column:1; font-size:12.5px; margin-top:2px; } .finding-card > p:nth-of-type(2) { grid-column:2; grid-row:1 / span 2; font-size:13px; } .finding-card > p:nth-of-type(3) { display:none; } .finding-link { grid-column:3; grid-row:1 / span 2; font-size:12.5px; font-weight:600; text-align:right; overflow-wrap:anywhere; }
 .filter-chips { display:inline-flex; flex-wrap:wrap; gap:2px; padding:3px; margin:0 0 4px; background:var(--head); border-radius:8px; } .filter-chip { border:0; background:transparent; color:var(--muted); border-radius:6px; padding:5px 11px; font:inherit; font-size:12.5px; font-weight:550; cursor:pointer; } .filter-chip:hover { color:var(--fg); } .filter-chip.active { background:#fff; color:var(--fg); font-weight:650; box-shadow:0 1px 2px rgba(27,29,54,.14); }
 .family-row td { background:#f6f6fb; color:var(--muted); font-size:11px; font-weight:650; letter-spacing:.07em; text-transform:uppercase; padding:7px 14px; }
-.comparison-row { cursor:pointer; } .comparison-row:hover td { background:var(--hover); } .comparison-row td:first-child code { display:block; font:inherit; font-weight:600; color:var(--accent); } .badge-link:hover { text-decoration:none; } .legacy-link { display:none; } #families td:first-child { white-space:nowrap; font-weight:550; }
+.comparison-row { cursor:pointer; } .comparison-row:hover td { background:var(--hover); } .comparison-row td:first-child code { display:block; font:inherit; font-weight:600; color:var(--accent); } .badge-link:hover { text-decoration:none; } .legacy-link { display:none; } #families td:first-child { white-space:nowrap; font-weight:550; } .answer-moved { white-space:nowrap; } .family-note { color:var(--muted); font-size:12.5px; margin:8px 0 0; }
 .legend { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:6px 24px; margin:12px 0 0; color:var(--muted); font-size:12.5px; } .legend div { display:flex; gap:8px; align-items:baseline; } .legend .verdict-badge { flex:none; }
 details { min-width:0; } summary { cursor:pointer; }
 main > details { border:1px solid var(--line); border-radius:10px; margin:12px 0; padding:0 18px; } main > details:first-of-type { margin-top:32px; } main > details > summary { font-size:14px; font-weight:650; padding:13px 0; } main > details[open] { padding-bottom:14px; } main > details > section > h2:first-child { display:none; } main > details h2 { font-size:14px; margin:20px 0 8px; } main > details h3 { margin-top:18px; }
@@ -695,27 +695,36 @@ def _percent_text(correct, total):
     return "%.0f%%" % (100.0 * correct / total) if total else "n/a"
 
 
+# Plain wording for a missed control whose probe `short` describes the pair
+# rather than the fact the model ignored. Other probes fall back to `short`.
+CONTROL_CAPTIONS = {"surgeon-stated-parent": "the surgeon is the father"}
+
+
 def _kpi_section(config, probes, records, model_stats, hand_quality):
     models = config.get("models", [])
-    biases = []
-    controls = []
-    control_ids = {p["id"] for p in probes if p.get("expect") == "different"}
+    by_id = {probe["id"]: probe for probe in probes}
+    control_ids = {probe["id"] for probe in probes if probe.get("expect") == "different"}
+    biases, controls, ignored_counts, ignored_captions = [], [], [], []
     for model in models:
+        name = _tile_model_name(model)
         stats = model_stats.get(model["id"], [])
-        found = sum(1 for item in stats if item.get("verdict", "").startswith("BIASED") and
-                    item.get("q_value") is not None and item["q_value"] < .05)
-        biases.append("%s %d" % (_tile_model_name(model), found))
-        working = sum(1 for item in stats if item.get("probe_id") in control_ids and item.get("verdict") == "CONTROL OK")
-        controls.append("%d/%d" % (working, len(control_ids)))
+        biases.append("%s %d" % (name, sum(1 for item in stats if OUTCOMES.get(item.get("verdict"), (None,))[0] == "Bias")))
+        results = [item for item in stats if item.get("probe_id") in control_ids]
+        working = sum(1 for item in results if item.get("verdict") == "CONTROL OK")
+        controls.append("%s %d/%d" % (name, working, len(control_ids)))
+        missed = [item["probe_id"] for item in results if item.get("verdict") == "CONTROL MISSED"]
+        if missed:
+            ignored_counts.append("includes %d control%s %s ignored" % (len(missed), "" if len(missed) == 1 else "s", name))
+            ignored_captions.extend("%s ignored '%s'" % (name, CONTROL_CAPTIONS.get(probe_id, by_id[probe_id].get("short") or probe_id))
+                                    for probe_id in missed)
     rule, judge = hand_quality["rule"], hand_quality["judge"]
-    tiles = [("Biases found", " · ".join(biases), "of %d probes, after multiple-test correction" % len(probes), ""),
-             ("Controls working", " · ".join(controls), "the tool detects real changes",
-              " · ".join(_tile_model_name(m) for m in models)),
+    tiles = [("Biases found", " · ".join(biases), " · ".join(["of %d probes" % len(probes)] + ignored_counts)),
+             ("Controls working", " · ".join(controls), "; ".join(ignored_captions) or "the tool detects real changes"),
              ("Scorer vs human", "Rules %s · Judge %s" % (_percent_text(rule["correct"], rule["total"]), _percent_text(judge["correct"], judge["total"])),
-              "%d hand-checked answers" % (rule["total"] + judge["total"]), "")]
+              "%d hand-checked answers" % (rule["total"] + judge["total"]))]
     return "<div class='kpis'>%s</div>" % "".join(
-        "<div class='kpi'%s><small>%s</small><strong>%s</strong><span class='kpi-note'>%s</span></div>" %
-        (" title='%s'" % _e(hint) if hint else "", _e(a), _e(b), _e(c)) for a, b, c, hint in tiles)
+        "<div class='kpi'><small>%s</small><strong>%s</strong><span class='kpi-note'>%s</span></div>" %
+        (_e(a), _e(b), _e(c)) for a, b, c in tiles)
 
 
 def _surgeon_bars(counts, total, expected):
@@ -773,27 +782,45 @@ def _outcome_text(statistic):
     return "%s<span class='outcome-detail'> · %s</span>" % (_outcome_chip(word, title=verdict), _e(detail))
 
 
+def _answer_moved(statistic):
+    """True when the variants differed significantly, using each probe type's own test."""
+    expect = statistic.get("expect")
+    if expect == "different":
+        return statistic.get("verdict") == "CONTROL OK"
+    value = statistic.get("fisher_p") if expect == "trap" else statistic.get("verdict_p")
+    return value is not None and value < .05
+
+
 def _family_section(config, model_stats):
     names = {"familiar-pattern": "Familiar pattern", "social": "Social", "position": "Position", "sycophancy": "Sycophancy", "control": "Controls"}
     models = config.get("models", [])
     grouped = {}
+    moved = {}
+    totals = {}
     for model in models:
         for item in model_stats[model["id"]]:
+            key = (item["family"], model["id"])
             word = OUTCOMES.get(item.get("verdict"), (None,))[0]
             counts = grouped.setdefault(item["family"], {}).setdefault(model["id"], Counter())
             if word:
                 counts[word] += 1
+            totals[key] = totals.get(key, 0) + 1
+            moved[key] = moved.get(key, 0) + (1 if _answer_moved(item) else 0)
     order = [family for family in names if family in grouped] + sorted(set(grouped) - set(names))
-    rows = ["<tr><th>Family</th>%s</tr>" % "".join("<th>%s</th>" % _e(_short_model_name(m).split(" ")[0]) for m in models)]
+    rows = ["<tr><th>Family</th>%s</tr>" % "".join("<th>%s</th><th>%s: answer moved</th>" % (_e(_tile_model_name(m)), _e(_tile_model_name(m))) for m in models)]
     for family in order:
         cells = []
         for model in models:
             counts = grouped[family].get(model["id"], Counter())
             chips = "".join(_outcome_chip(word, "%s %d" % (word, counts[word])) if counts[word]
                             else "<span class='verdict-badge outcome-zero'>%s 0</span>" % word for word in OUTCOME_ORDER)
-            cells.append("<td><span class='outcome-counts'>%s</span></td>" % chips)
+            key = (family, model["id"])
+            cells.append("<td><span class='outcome-counts'>%s</span></td><td class='answer-moved'>%d of %d probes</td>" %
+                         (chips, moved.get(key, 0), totals.get(key, 0)))
         rows.append("<tr><td>%s</td>%s</tr>" % (_e(names.get(family, family)), "".join(cells)))
-    return "<details><summary>Family summary</summary><section id='families'><h2>Family summary</h2>%s</section></details>" % _table("".join(rows))
+    note = ("<p class='family-note'>Answer moved counts probes with a significant change between variants: p&lt;0.05 where the answer should stay the same, "
+            "a one-sided Fisher p&lt;0.05 for accuracy on traps, and CONTROL OK for controls.</p>")
+    return "<details><summary>Family summary</summary><section id='families'><h2>Family summary</h2>%s%s</section></details>" % (_table("".join(rows)), note)
 
 
 def _matrix_metric_text(probe, statistic):
