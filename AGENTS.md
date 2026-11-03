@@ -17,8 +17,11 @@ A small tool that runs counterfactual prompt pairs against an LLM on OpenRouter,
 ```
 bias-probe/
 ├── AGENTS.md
+├── docs/
+│   ├── PROMPTS.md
+│   ├── SCORING_POLICY.md
+│   └── build_logs.md
 ├── README.md
-├── SCORING_POLICY.md
 ├── config.json
 ├── .env.example          # OPENROUTER_API_KEY=sk-or-v1-your-key-here
 ├── .gitignore            # .env, __pycache__, data_mock/
@@ -133,7 +136,7 @@ Also compute **minimum detectable effect** for the chosen repeats (e.g. with 10 
 3. Family summary table: probes per verdict, mean movement, mean pattern-capture rate.
 4. Model comparison table: rows = probes, columns = models, cells = verdict + movement.
 5. Scorer quality: judge-test results, hand-label agreement (or "not yet labelled"), number of judge-labelled and unscorable answers.
-6. Methods and limits (short; link to SCORING_POLICY.md).
+6. Methods and limits (short; link to `docs/SCORING_POLICY.md`).
 Per-model page: one card per probe — `why`, expectation, verdict badge, per-variant columns (prompt, expected answer, label-share bars, modal share, accuracy, T=0 answers), movement, p, q, pattern/stereotype rates; and **every raw response one click away** in `<details>` (label, label source, temperature, repeat, timestamp, provider, full text). Mark mock data with a big red banner. Use inline CSS, readable in light and dark mode.
 
 ## CLI (`python3 -m probe <command>`)

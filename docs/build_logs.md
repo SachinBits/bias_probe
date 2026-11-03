@@ -222,3 +222,15 @@ The final Phase 3.1 verification remained green: 38 unittest tests passed and `p
 - Trap scoring now records original and changed accuracy counts, changed accuracy drop, and the most common changed-variant wrong label. `BIASED (pattern)` requires famous-answer capture; `FAILED (other error)` covers significant drops caused by another wrong label.
 - Current-only report headers now show returned model/provider counts, superseded providers, and recovered/still-failed call counts. Report cards distinguish categorical movement, integer mean gaps, and trap accuracy drops, with q-significance markers.
 - Judge-disabled scoring skips Judge construction and credential checks; judge prompts deduplicate allowed labels. Schedule, MDE, and T=0 output are rendered as readable text with raw counts.
+
+## Phase 3.2 — Small report fixes
+
+- Benjamini–Hochberg correction now uses `verdict_p`: Fisher p for trap probes and permutation p for all other probes. Reports retain both p values where applicable and show q-values.
+- Restored `AGENTS.md` to the repository root so coding agents load it automatically; documentation and report links were updated after the Markdown reorganization.
+- Familiar-pattern `CONTROL MISSED` cards now explain that the answer did not change although the prompt stated the answer, indicating the model may not be reading the changed fact.
+
+### Verification
+
+- `python3 -m unittest` → 39 tests passed.
+- `python3 -m probe report` → rebuilt successfully offline.
+- No API calls were made and `data/responses/` was not modified.

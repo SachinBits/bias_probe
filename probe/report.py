@@ -166,6 +166,13 @@ def _metric_text(probe, statistic):
                                                                statistic["movement"]["within"])
 
 
+def _p_text(probe, statistic):
+    if probe.get("expect") == "trap" and statistic.get("fisher_p") is not None:
+        return "p(permutation)=%.4g; p(Fisher)=%.4g; q=%.4g" % (statistic["p_value"],
+                                                                  statistic["fisher_p"], statistic["q_value"])
+    return "p=%.4g; q=%.4g" % (statistic["verdict_p"], statistic["q_value"])
+
+
 def _mde_sentence(config):
     repeats = next((item.get("repeats") for item in config.get("schedule", [])
                     if item.get("temperature") == 0.7), 10)
@@ -200,14 +207,14 @@ def _probe_card(probe, statistic, rows, report_dir):
     pattern_text = ""
     if statistic.get("pattern_total") is not None:
         pattern_text = "; pattern capture=%s" % fraction(statistic.get("pattern_count", 0), statistic.get("pattern_total", 0))
+    control_note = ""
+    if probe.get("family") == "familiar-pattern" and statistic.get("verdict") == "CONTROL MISSED":
+        control_note = "<br>Control missed: the answer did not change although the prompt stated the answer — the model is not reading the changed fact."
     return ("<article class='card'><h3>%s <span class='badge'>%s</span></h3><p>%s</p>"
-            "<p>Expectation: <code>%s</code>; %s; p=%.4g; q=%.4g"
-            "%s%s</p><table><tr>%s</tr></table><h4>Raw responses</h4>%s</article>" %
+            "<p>Expectation: <code>%s</code>; %s; %s%s%s%s</p><table><tr>%s</tr></table><h4>Raw responses</h4>%s</article>" %
             (_e(probe["id"]), _verdict_text(statistic), _e(probe.get("why", "")), _e(probe.get("expect")),
              _metric_text(probe, statistic),
-             statistic["p_value"], statistic["q_value"],
-             ("; Fisher p=%.4g%s" % (statistic["fisher_p"], pattern_text)
-              if statistic.get("fisher_p") is not None else ""), stereo_text, "".join(variants), raw))
+             _p_text(probe, statistic), pattern_text, stereo_text, control_note, "".join(variants), raw))
 
 
 def _page_shell(title, body, mock=False):
@@ -303,7 +310,7 @@ def build_report(config, probes, data_dir, output_dir="reports", mock=False):
     index_parts.append("<h2>Scorer quality</h2><p>Sources: %s<br>Human-labelled: %s<br>Judge validation: %s</p>" %
                        (_e(json.dumps(dict(source_counts), sort_keys=True)), human_count,
                         "fixture available; no saved judge-test result (real judge not validated offline)"))
-    index_parts.append("<h2>Methods and limits</h2><p>Metrics use current configuration-matching successful records only. Raw records remain in JSONL and are linked from each model page. See <a href='../SCORING_POLICY.md'>SCORING_POLICY.md</a>.</p>")
+    index_parts.append("<h2>Methods and limits</h2><p>Metrics use current configuration-matching successful records only. Raw records remain in JSONL and are linked from each model page. See <a href='../docs/SCORING_POLICY.md'>SCORING_POLICY.md</a>.</p>")
     (output_dir / "index.html").write_text(_page_shell("Bias Probe report", "".join(index_parts), mock), encoding="utf-8")
 
     for model in config.get("models", []):

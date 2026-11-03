@@ -7,7 +7,7 @@ from probe.bank import load_probe_files
 from probe.config import load_config
 from probe.report import build_report
 from probe.stats import (bh_qvalues, fisher_exact_one_sided, movement,
-                         permutation_pvalue, variant_summary, verdict)
+                         permutation_pvalue, variant_summary, verdict, verdict_p_value)
 from probe.judge import Judge
 from probe.cli import _make_client
 
@@ -26,6 +26,12 @@ class Phase3StatsTests(unittest.TestCase):
 
     def test_bh_known_example(self):
         self.assertEqual([round(value, 2) for value in bh_qvalues([.01, .04, .2])], [.03, .06, .2])
+
+    def test_bh_uses_fisher_p_for_traps(self):
+        trap = {"expect": "trap"}
+        verdict_p = verdict_p_value(trap, 1.0, 1e-5)
+        self.assertEqual(verdict_p, 1e-5)
+        self.assertLess(bh_qvalues([verdict_p])[0], 0.05)
 
     def test_each_verdict_on_hand_made_inputs(self):
         base = {"family": "social", "expect": "same"}
@@ -80,6 +86,8 @@ class Phase3ReportTests(unittest.TestCase):
             self.assertIn("10 × T=0.7, 3 × T=0", text)
             self.assertIn("T=0:", text)
             self.assertNotIn("T=0: {", text)
+            model_page = (output / "openai__gpt-4o-mini-2024-07-18.html").read_text(encoding="utf-8")
+            self.assertIn("Control missed: the answer did not change although the prompt stated the answer — the model is not reading the changed fact.", model_page)
             self.assertTrue((output / "openai__gpt-4o-mini-2024-07-18.html").exists())
             self.assertNotIn("https://", text)
 

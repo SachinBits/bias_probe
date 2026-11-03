@@ -118,6 +118,13 @@ def permutation_pvalue(labels_by_variant, permutations=5000, seed=12345, numeric
     return (at_least + 1.0) / (max(0, int(permutations)) + 1.0)
 
 
+def verdict_p_value(probe, p_value, fisher_p=None):
+    """Return the p-value used by the probe's verdict and BH correction."""
+    if probe.get("expect") == "trap" and fisher_p is not None:
+        return float(fisher_p)
+    return float(p_value)
+
+
 def _to_float(value):
     try:
         return float(value)
@@ -344,10 +351,11 @@ def compute_probe_stats(records, probe, temperature=0.7, permutations=5000, seed
     accuracy_drop = None
     if original_total and changed_total:
         accuracy_drop = original_correct / original_total - changed_correct / changed_total
+    verdict_p = verdict_p_value(probe, p_value, fisher)
     return {"probe_id": probe["id"], "family": probe["family"], "expect": probe["expect"],
             "parse": probe.get("parse"),
             "temperature": temperature, "n": len(selected), "variants": variant_results,
-            "movement": movement_stats, "p_value": p_value, "q_value": None,
+            "movement": movement_stats, "p_value": p_value, "verdict_p": verdict_p, "q_value": None,
             "fisher_p": fisher, "pattern_capture": pattern, "pattern_count": pattern_count,
             "pattern_total": pattern_total, "changed_wrong_label": changed_wrong_label,
             "most_common_wrong_label": changed_wrong_label,
@@ -376,7 +384,7 @@ def minimum_detectable_effect(repeats=10, alpha=0.05):
 def aggregate_model_stats(records, probes, config, temperature=0.7):
     result = [compute_probe_stats(records, probe, temperature, config.get("permutations", 5000),
                                   config.get("seed", 12345)) for probe in probes]
-    for item, q_value in zip(result, bh_qvalues([row["p_value"] for row in result])):
+    for item, q_value in zip(result, bh_qvalues([row["verdict_p"] for row in result])):
         item["q_value"] = q_value
     return result
 
