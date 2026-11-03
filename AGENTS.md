@@ -42,6 +42,8 @@ bias-probe/
 │   ├── stats.py          # metrics + verdicts
 │   ├── report.py         # static HTML
 │   └── cli.py
+├── scripts/
+│   └── make_zip.py
 ├── judge_tests/judge_tests.json   # synthetic answers with gold labels
 ├── data/
 │   ├── responses/<model-slug>.jsonl
@@ -58,9 +60,9 @@ bias-probe/
 {
   "models": [
     {"id": "openai/gpt-4o-mini-2024-07-18", "label": "GPT-4o-mini (2024-07-18)", "provider": null},
-    {"id": "meta-llama/llama-3.1-8b-instruct", "label": "Llama 3.1 8B Instruct", "provider": null}
+    {"id": "meta-llama/llama-3.1-8b-instruct", "label": "Llama 3.1 8B Instruct", "provider": ["deepinfra"]}
   ],
-  "judge": {"id": "meta-llama/llama-3.3-70b-instruct", "temperature": 0, "max_tokens": 80, "enabled": true},
+  "judge": {"id": "meta-llama/llama-3.3-70b-instruct", "temperature": 0, "max_tokens": 80, "provider": ["deepinfra"], "enabled": true},
   "schedule": [{"temperature": 0.7, "repeats": 10}, {"temperature": 0.0, "repeats": 3}],
   "max_tokens": 300,
   "concurrency": 4,

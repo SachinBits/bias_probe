@@ -8,7 +8,7 @@ import os
 from collections import defaultdict
 from pathlib import Path
 
-from .bank import load_probe_files
+from .bank import BankError, load_probe_files, validate_probe
 from .client import MockClient, OpenRouterClient
 from .config import load_config, model_slug
 from .judge import Judge
@@ -43,6 +43,8 @@ def _parser():
     sp = sub.add_parser("check-scorer")
     sp.add_argument("--mock", action="store_true")
     sp.add_argument("--data-dir")
+    sp = sub.add_parser("add")
+    sp.add_argument("--file")
     return p
 
 
@@ -135,6 +137,7 @@ def run_judge_tests(args, config, probes):
     rule_correct = rule_wrong = rule_abstained = 0
     judge_correct = judge_wrong = judge_abstained = 0
     counter_rule = counter_rule_wrong = counter_rule_abstained = counter_judge = counter_judge_wrong = counter_judge_abstained = counter_total = 0
+    item_results = []
     for item in items:
         probe = by_id[item["probe_id"]]
         variant = variants.get((item["probe_id"], item.get("variant_id"))) or probe["variants"][0]
@@ -147,6 +150,9 @@ def run_judge_tests(args, config, probes):
         if choice_mode and judged not in {"hedge", "refused", "unscorable"}:
             mapping = variant.get("map", {})
             judged = next((str(value) for key, value in mapping.items() if str(key) == str(judged)), "other")
+        item_results.append({"probe_id": item["probe_id"], "answer": item["answer"], "gold": item["gold"],
+                             "rule_label": rule.get("label") or "unscorable", "judge_label": judged,
+                             "counter_stereotype": bool(item.get("counter_stereotype"))})
         if rule.get("label") is None:
             rule_abstained += 1
         elif rule.get("label") == item["gold"]:
@@ -177,6 +183,17 @@ def run_judge_tests(args, config, probes):
     print("judge overall: correct=%d wrong=%d abstained=%d total=%d" % (judge_correct, judge_wrong, judge_abstained, len(items)))
     print("counter-stereotype rule: correct=%d wrong=%d abstained=%d total=%d" % (counter_rule, counter_rule_wrong, counter_rule_abstained, counter_total))
     print("counter-stereotype judge: correct=%d wrong=%d abstained=%d total=%d" % (counter_judge, counter_judge_wrong, counter_judge_abstained, counter_total))
+    result = {"schema_version": 1,
+              "overall": {"rule": {"correct": rule_correct, "wrong": rule_wrong, "abstained": rule_abstained},
+                          "judge": {"correct": judge_correct, "wrong": judge_wrong, "abstained": judge_abstained}},
+              "counter_stereotype": {"rule": {"correct": counter_rule, "wrong": counter_rule_wrong, "abstained": counter_rule_abstained},
+                                     "judge": {"correct": counter_judge, "wrong": counter_judge_wrong, "abstained": counter_judge_abstained}},
+              "items": item_results}
+    result_path = _data_dir(args) / "judge_test_results.json"
+    result_path.parent.mkdir(parents=True, exist_ok=True)
+    result_path.write_text(json.dumps(result, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    print("Judge-test results written to %s" % result_path)
+    return result
 
 
 def sample_hand_labels(args):
@@ -224,6 +241,74 @@ def check_scorer(args):
     print("labelled rows: %d/%d" % (len(labelled), len(rows)))
 
 
+def _prompt_value(label, required=True):
+    value = input(label).strip()
+    if required and not value:
+        raise SystemExit("%s is required" % label.rstrip(": "))
+    return value
+
+
+def _split_labels(value):
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
+def _probe_from_file(path):
+    payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    if isinstance(payload, dict) and payload.get("format") == "probe-bank/v1":
+        candidates = payload.get("probes", [])
+    elif isinstance(payload, dict) and isinstance(payload.get("probe"), dict):
+        candidates = [payload["probe"]]
+    elif isinstance(payload, dict):
+        candidates = [payload]
+    else:
+        raise SystemExit("Probe file must contain one probe object or a probe bank")
+    if not candidates:
+        raise SystemExit("Probe file contains no probes")
+    return candidates
+
+
+def add_probe(args):
+    if args.file:
+        candidates = _probe_from_file(args.file)
+    else:
+        probe = {"id": _prompt_value("id: "),
+                 "family": _prompt_value("family (familiar-pattern/social/position/sycophancy/control): "),
+                 "expect": _prompt_value("expect (same/different/trap): "),
+                 "labels": _split_labels(_prompt_value("labels (comma-separated): ")),
+                 "why": _prompt_value("why: ")}
+        parse = _prompt_value("parse (blank, integer, int_1_10, amount, letter, choice_number): ", False)
+        if parse:
+            probe["parse"] = parse
+        probe["variants"] = []
+        while True:
+            variant_id = _prompt_value("variant id (blank to finish): ", False)
+            if not variant_id:
+                break
+            variant = {"id": variant_id, "prompt": _prompt_value("prompt: ")}
+            answer = _prompt_value("answer (optional): ", False)
+            if answer:
+                variant["answer"] = answer
+            if parse in {"letter", "choice_number"}:
+                mapping = _prompt_value("map as TOKEN=LABEL pairs (comma-separated): ")
+                variant["map"] = {key.strip(): value.strip() for key, value in
+                                   (pair.split("=", 1) for pair in mapping.split(",") if "=" in pair)}
+            probe["variants"].append(variant)
+        candidates = [probe]
+    custom_path = Path("probes/custom.json")
+    bank = json.loads(custom_path.read_text(encoding="utf-8")) if custom_path.exists() else {"format": "probe-bank/v1", "probes": []}
+    existing = {probe.get("id") for probe in bank.get("probes", [])}
+    for candidate in candidates:
+        validate_probe(candidate, "add")
+        if candidate["id"] in existing:
+            raise SystemExit("Probe id already exists in custom bank: %s" % candidate["id"])
+        bank.setdefault("probes", []).append(candidate)
+        existing.add(candidate["id"])
+        print("Added probe %s" % candidate["id"])
+    custom_path.write_text(json.dumps(bank, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+    for candidate in candidates:
+        print("Run it with: python3 -m probe all --probes %s" % candidate["id"])
+
+
 def main(argv=None):
     args = _parser().parse_args(argv)
     config = load_config()
@@ -245,7 +330,7 @@ def main(argv=None):
         judge = config.get("judge") or {}
         if judge.get("id"):
             try:
-                result = client.complete(judge["id"], "Reply with OK.", judge.get("temperature", 0), judge.get("max_tokens", 80), None, config["seed"], 0)
+                result = client.complete(judge["id"], "Reply with OK.", judge.get("temperature", 0), judge.get("max_tokens", 80), judge.get("provider"), config["seed"], 0)
                 print("judge %s -> model_returned=%s provider=%s" % (judge["id"], result.get("model_returned"), result.get("provider_returned")))
             except Exception as exc:
                 print("judge %s -> ERROR: %s" % (judge["id"], exc))
@@ -261,6 +346,9 @@ def main(argv=None):
         return
     if args.command == "check-scorer":
         check_scorer(args)
+        return
+    if args.command == "add":
+        add_probe(args)
         return
     if args.command == "report":
         data_dir = _data_dir(args)

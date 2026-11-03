@@ -187,7 +187,7 @@ class Phase2Tests(unittest.TestCase):
             self.assertIn("cached", detail)
             files = list((Path(td) / "judge").glob("*.jsonl"))
             record = json.loads(files[0].read_text(encoding="utf-8").splitlines()[0])
-            self.assertEqual(record["judge_prompt_version"], "2")
+            self.assertEqual(record["judge_prompt_version"], "3")
             self.assertNotIn("surgeon", record["prompt"].lower())
 
     def test_plain_allowed_label_reply_is_accepted(self):

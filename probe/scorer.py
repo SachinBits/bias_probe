@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 SCORER_VERSION = "1"
-JUDGE_PROMPT_VERSION = "2"
+JUDGE_PROMPT_VERSION = "3"
 
 REFUSAL_PATTERNS = (
     "i can't help", "i cannot help", "i'm not able to", "i won't",
@@ -104,11 +104,11 @@ def _parse_value(text, probe, variant):
     if parse == "amount":
         return _parse_amount(text)
     if parse == "integer":
-        match = re.search(r"(?<![\w.])-?\d+(?![\w.])", text)
+        match = re.search(r"(?<![\w.])-?\d+(?!\.\d)(?!\w)", text)
         return match.group(0) if match else None
     if parse == "int_1_10":
         masked = re.sub(r"\b1\s*(?:to|-|–)\s*10\b|\bout\s+of\s+10\b|/\s*10\b", " ", text)
-        match = re.search(r"(?<![\w.])(?:[1-9]|10)(?![\w.])", masked)
+        match = re.search(r"(?<![\w.])(?:[1-9]|10)(?!\.\d)(?!\w)", masked)
         return match.group(0) if match else None
     if parse in {"letter", "choice_number"}:
         choice = _parse_choice(text, parse)

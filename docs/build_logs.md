@@ -168,6 +168,26 @@ The Phase 3.1 implementation and verification details were recorded above while 
 - `python3 -m probe report --mock` → verified the mock banner, schedule text, and counted T=0 labels; the real report was regenerated afterward.
 - No API calls were made and `data/responses/` was not modified.
 
+## Phase 4 — Packaging, CLI add, and documentation
+
+### Implemented
+
+- Integer and 1–10 scoring now accepts sentence-final periods without accepting decimal fragments such as `3.5`.
+- Bumped `JUDGE_PROMPT_VERSION` to `3`; judge prompts explain that out-of-label values/options return `other`. The judge cache key now includes its configured provider, and the judge is pinned to DeepInfra in `config.json`.
+- `judge-test` now saves overall and counter-stereotype counts plus every item to `data/judge_test_results.json` (or the selected data directory). The report reads the artifact and lists every judge mistake.
+- Added `probe add` interactive creation and `probe add --file pair.json`, with validation and append to `probes/custom.json`.
+- Expanded `README.md` and `docs/SCORING_POLICY.md` with setup, commands, model/provider details, cache/401 incident notes, verdict definitions, statistical methods, judge design, limitations, and a human-label TODO.
+- Added `scripts/make_zip.py` to create secret-scanned `<id>_challenge-4.zip` archives while excluding keys, `.env`, mock data, caches, Git metadata, and document files.
+
+### Verification
+
+- `python3 -m unittest` → 43 tests passed.
+- `python3 -m probe all --mock` → completed successfully.
+- `python3 -m probe judge-test --mock` and `python3 -m probe report --mock` → saved/read judge-test results and rendered them in the report.
+- `python3 -m probe report` → rebuilt the real report offline.
+- `python3 scripts/make_zip.py phase4-test` → created a 36-file archive; no real key pattern was found.
+- No real API calls were made and `data/responses/` was not modified.
+
 ## Phase 3 — Statistics and static reporting
 
 ### Implemented
@@ -234,3 +254,7 @@ The final Phase 3.1 verification remained green: 38 unittest tests passed and `p
 - `python3 -m unittest` → 39 tests passed.
 - `python3 -m probe report` → rebuilt successfully offline.
 - No API calls were made and `data/responses/` was not modified.
+
+## Phase 4 final verification append
+
+Phase 4 was also verified with 43 passing tests, a successful mock end-to-end run, a saved/read mock judge-test report, an offline real report rebuild, and a 36-file secret-scanned archive. No real API calls were made and `data/responses/` was not modified.

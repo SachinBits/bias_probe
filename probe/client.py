@@ -152,7 +152,7 @@ class MockClient:
             return json.dumps({"label": "doctor"})
         if any(x in answer for x in ("could be either", "either", "both", "ambiguous", "cannot decide", "maybe")):
             return json.dumps({"label": "hedge"})
-        return json.dumps({"label": "unscorable"})
+        return json.dumps({"label": "other" if "other" in allowed else "unscorable"})
 
     @staticmethod
     def _content_labels(probe):

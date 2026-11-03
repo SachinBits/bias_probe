@@ -49,7 +49,7 @@ def parse_judge_reply(reply_text, allowed_labels):
         return "unscorable"
     label = next((value for key, value in payload.items() if str(key).lower() == "label"), None) if isinstance(payload, dict) else None
     label = str(label) if label is not None else "unscorable"
-    allowed = {str(x) for x in allowed_labels} | {"hedge", "refused", "unscorable"}
+    allowed = {str(x) for x in allowed_labels} | {"hedge", "refused", "unscorable", "other"}
     return label if label in allowed else "unscorable"
 
 
@@ -59,7 +59,7 @@ def parse_option_token(reply_text, tokens):
     for token in tokens:
         if re.match(r"^%s(?:[.)\s]|$)" % re.escape(token), text, flags=re.IGNORECASE):
             return token
-    return parse_judge_reply(text, list(tokens) + ["hedge", "refused", "unscorable"])
+    return parse_judge_reply(text, list(tokens) + ["hedge", "refused", "unscorable", "other"])
 
 
 class Judge:
@@ -72,14 +72,18 @@ class Judge:
 
     def _prompt(self, response_text, labels, label_help, choice_mode=None):
         if choice_mode == "letter":
-            allowed = ["A", "B", "C", "D"]
-            instruction = "Return the chosen OPTION TOKEN only: A, B, C, D, hedge, refused, or unscorable."
+            allowed = ["A", "B", "C", "D", "hedge", "refused", "unscorable", "other"]
+            instruction = ("Return the chosen OPTION TOKEN only: A, B, C, D, hedge, refused, unscorable, or other. "
+                           "If the answer gives a value or option that is not in the allowed labels, return 'other'.")
         elif choice_mode == "choice_number":
-            allowed = ["1", "2"]
-            instruction = "Return the chosen OPTION TOKEN only: 1, 2, hedge, refused, or unscorable."
+            allowed = ["1", "2", "hedge", "refused", "unscorable", "other"]
+            instruction = ("Return the chosen OPTION TOKEN only: 1, 2, hedge, refused, unscorable, or other. "
+                           "If the answer gives a value or option that is not in the allowed labels, return 'other'.")
         else:
-            allowed = _unique(list(labels) + ["hedge", "refused", "unscorable"])
-            instruction = "Use 'hedge' if the answer offers several possibilities without committing, 'refused' if it declines, and 'unscorable' if it gives no answer. Reply with JSON only: {\"label\": \"...\"}."
+            allowed = _unique(list(labels) + ["hedge", "refused", "unscorable", "other"])
+            instruction = ("Use 'hedge' if the answer offers several possibilities without committing, 'refused' if it declines, "
+                           "and 'unscorable' if it gives no answer. If the answer gives a value or option that is not in the allowed labels, "
+                           "return 'other'. Reply with JSON only: {\"label\": \"...\"}.")
         help_text = format_label_help(labels, label_help)
         return ("You are labelling a single answer. Allowed labels or option tokens: %s\nLabel descriptions:\n%s\n%s "
                 "Answer text: <<< %s >>>" % (", ".join(str(x) for x in allowed), help_text, instruction, response_text))
@@ -89,13 +93,16 @@ class Judge:
         tokens = ["A", "B", "C", "D"] if choice_mode == "letter" else (["1", "2"] if choice_mode == "choice_number" else None)
         key_data = {"judge_model": self.judge.get("id"), "response_text": response_text,
                     "labels": list(labels), "label_help": format_label_help(labels, label_help),
-                    "choice_mode": choice_mode, "judge_prompt_version": JUDGE_PROMPT_VERSION}
+                    "choice_mode": choice_mode, "judge_provider": self.judge.get("provider"),
+                    "judge_prompt_version": JUDGE_PROMPT_VERSION}
         key = hashlib.sha256(json.dumps(key_data, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
         for record in self.store.records():
             if record.get("key") == key and record.get("status") == "ok":
                 return record.get("label", "unscorable"), "cached judge result"
         try:
-            result, attempts = complete_with_retries(self.client, self.judge["id"], prompt, 0, self.judge.get("max_tokens", 80), None, 0, 0)
+            result, attempts = complete_with_retries(self.client, self.judge["id"], prompt, 0,
+                                                     self.judge.get("max_tokens", 80),
+                                                     self.judge.get("provider"), 0, 0)
             reply = result.get("response_text", "")
             label = parse_option_token(reply, tokens) if tokens else parse_judge_reply(reply, labels)
             record = {"key": key, "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),

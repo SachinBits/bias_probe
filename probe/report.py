@@ -307,9 +307,32 @@ def build_report(config, probes, data_dir, output_dir="reports", mock=False):
     if hand_path.exists():
         with hand_path.open(encoding="utf-8") as handle:
             human_count = sum(bool(row.get("human_label", "").strip()) for row in csv.DictReader(handle))
+    judge_results_path = data_dir / "judge_test_results.json"
+    judge_quality = "real judge not validated"
+    if judge_results_path.exists():
+        try:
+            judge_results = json.loads(judge_results_path.read_text(encoding="utf-8"))
+            overall = judge_results.get("overall", {})
+            counter = judge_results.get("counter_stereotype", {})
+            mistakes = [row for row in judge_results.get("items", [])
+                        if row.get("judge_label") != row.get("gold")]
+            def counts_text(section):
+                return "correct=%d, wrong=%d, abstained=%d" % (section.get("correct", 0),
+                                                                section.get("wrong", 0), section.get("abstained", 0))
+            mistake_text = "".join("<li>%s: %s → gold %s (answer: %s)</li>" %
+                                    (_e(row.get("probe_id")), _e(row.get("judge_label")), _e(row.get("gold")),
+                                     _e(row.get("answer"))) for row in mistakes)
+            judge_quality = ("overall rule [%s]; overall judge [%s]; counter-stereotype rule [%s]; "
+                             "counter-stereotype judge [%s]<br>Judge mistakes: %s%s" %
+                             (counts_text(overall.get("rule", {})), counts_text(overall.get("judge", {})),
+                              counts_text(counter.get("rule", {})), counts_text(counter.get("judge", {})),
+                              "none" if not mistakes else "<ul>" + mistake_text + "</ul>",
+                              ""))
+        except (OSError, TypeError, ValueError):
+            judge_quality = "judge-test results could not be parsed"
     index_parts.append("<h2>Scorer quality</h2><p>Sources: %s<br>Human-labelled: %s<br>Judge validation: %s</p>" %
                        (_e(json.dumps(dict(source_counts), sort_keys=True)), human_count,
-                        "fixture available; no saved judge-test result (real judge not validated offline)"))
+                        judge_quality))
     index_parts.append("<h2>Methods and limits</h2><p>Metrics use current configuration-matching successful records only. Raw records remain in JSONL and are linked from each model page. See <a href='../docs/SCORING_POLICY.md'>SCORING_POLICY.md</a>.</p>")
     (output_dir / "index.html").write_text(_page_shell("Bias Probe report", "".join(index_parts), mock), encoding="utf-8")
 
