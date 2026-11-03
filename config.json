@@ -1,0 +1,14 @@
+{
+  "models": [
+    {"id": "openai/gpt-4o-mini-2024-07-18", "label": "GPT-4o-mini (2024-07-18)", "provider": null},
+    {"id": "meta-llama/llama-3.1-8b-instruct", "label": "Llama 3.1 8B Instruct", "provider": null}
+  ],
+  "judge": {"id": "meta-llama/llama-3.3-70b-instruct", "temperature": 0, "max_tokens": 80, "enabled": true},
+  "schedule": [{"temperature": 0.7, "repeats": 10}, {"temperature": 0.0, "repeats": 3}],
+  "max_tokens": 300,
+  "concurrency": 4,
+  "spend_cap_usd": 3.0,
+  "probe_files": ["probes/bank.json", "probes/custom.json"],
+  "permutations": 5000,
+  "seed": 12345
+}
