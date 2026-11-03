@@ -41,15 +41,20 @@ def _result(label, detail):
 
 
 def _parse_amount(text):
-    cents = re.search(r"\b(\d+(?:\.\d{1,2})?)\s*cents?\b", text)
+    word_cents = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "ten": 10}
+    cents = re.search(r"\b(\d+(?:\.\d{1,2})?|one|two|three|four|five|ten)\s*cents?\b", text)
     if cents:
-        return "%.2f" % (float(cents.group(1)) / 100.0)
-    money = re.search(r"\$\s*(\d+(?:\.\d{1,2})?)\b", text)
+        raw = cents.group(1)
+        value = word_cents[raw] if raw in word_cents else float(raw)
+        return "%.2f" % (value / 100.0)
+    money = re.search(r"\$\s*(?:(\d+(?:\.\d{1,2})?)|(\.\d{1,2}))\b", text)
     if money:
-        return "%.2f" % float(money.group(1))
-    decimal = re.search(r"(?<![\w.])(\d+\.\d{1,2})(?![\w.])", text)
+        value = money.group(1) or ("0" + money.group(2))
+        return "%.2f" % float(value)
+    decimal = re.search(r"(?<![\w.])(?:([0-9]+\.[0-9]{1,2})|(\.[0-9]{1,2}))(?![\w.])", text)
     if decimal:
-        return "%.2f" % float(decimal.group(1))
+        value = decimal.group(1) or ("0" + decimal.group(2))
+        return "%.2f" % float(value)
     return None
 
 
@@ -57,7 +62,7 @@ def _parse_choice(text, parse):
     if parse == "letter":
         match = re.search(r"(?:answer\s+(?:is|:)|^|\b)([a-d])(?:\s*[).:]|\s*$)", text)
     else:
-        match = re.search(r"(?:choice\s*)?([12])(?:\s*[).:]|\s*$)", text)
+        match = re.fullmatch(r"(?:choice\s+|answer\s+(?:is|:)\s*)?([12])[.!]?", text)
     return match.group(1).upper() if match else None
 
 
@@ -71,7 +76,8 @@ def _parse_value(text, probe, variant):
         match = re.search(r"(?<![\w.])-?\d+(?![\w.])", text)
         return match.group(0) if match else None
     if parse == "int_1_10":
-        match = re.search(r"(?<![\w.])(?:[1-9]|10)(?![\w.])", text)
+        masked = re.sub(r"\b1\s*(?:to|-|–)\s*10\b|\bout\s+of\s+10\b|/\s*10\b", " ", text)
+        match = re.search(r"(?<![\w.])(?:[1-9]|10)(?![\w.])", masked)
         return match.group(0) if match else None
     if parse in {"letter", "choice_number"}:
         choice = _parse_choice(text, parse)
@@ -132,6 +138,12 @@ def score_response(response_text, probe, variant, judge=None):
     if result.get("label") is not None:
         return result
     if judge is not None:
-        label, detail = judge.classify(response_text, probe.get("labels", []), probe.get("label_help", ""))
+        choice_mode = probe.get("parse") if probe.get("parse") in {"letter", "choice_number"} else None
+        label, detail = judge.classify(response_text, probe.get("labels", []), probe.get("label_help", ""), choice_mode=choice_mode)
+        if choice_mode and label not in {"hedge", "refused", "unscorable"}:
+            mapping = variant.get("map", {})
+            mapped = next((str(value) for key, value in mapping.items() if str(key).upper() == str(label).upper()), None)
+            label = mapped if mapped in [str(x) for x in probe.get("labels", [])] else "other"
+            detail = detail + "; mapped option token"
         return {"label": label, "source": "judge" if label != "unscorable" else "none", "detail": detail}
     return {"label": "unscorable", "source": "none", "detail": result.get("detail", "unscorable")}

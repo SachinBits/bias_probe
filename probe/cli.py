@@ -61,6 +61,15 @@ def _probe_maps(probes):
     return by_id, variants
 
 
+def _response_matches_config(response, model, config):
+    params = response.get("params") or {}
+    temperatures = {item["temperature"] for item in config.get("schedule", [])}
+    return (response.get("model_requested") == model["id"] and
+            params.get("provider") == model.get("provider") and
+            params.get("temperature") in temperatures and
+            params.get("max_tokens") == config.get("max_tokens"))
+
+
 def score_models(args, config, probes, client):
     data_dir = _data_dir(args)
     by_id, variants = _probe_maps(probes)
@@ -76,9 +85,13 @@ def score_models(args, config, probes, client):
             label_path.unlink()
         label_store = JsonlStore(label_path)
         counts = defaultdict(int)
+        superseded = 0
         if response_path.exists():
             for response in JsonlStore(response_path).records():
                 if response.get("status") != "ok":
+                    continue
+                if not _response_matches_config(response, model, config):
+                    superseded += 1
                     continue
                 probe = by_id.get(response.get("probe_id"))
                 variant = variants.get((response.get("probe_id"), response.get("variant_id")))
@@ -95,7 +108,8 @@ def score_models(args, config, probes, client):
                 label_store.append(record)
                 counts[scored["source"] + ":" + scored["label"]] += 1
         results.append((model["id"], dict(counts)))
-        print("%s: %s" % (model["id"], ", ".join("%s=%d" % x for x in sorted(counts.items())) or "no responses"))
+        summary = ", ".join("%s=%d" % x for x in sorted(counts.items())) or "no responses"
+        print("%s: %s; superseded=%d" % (model["id"], summary, superseded))
     return results
 
 
@@ -104,23 +118,17 @@ def run_judge_tests(args, config, probes):
     items = json.loads(path.read_text(encoding="utf-8"))["items"]
     client = _make_client(args, probes, config)
     judge = Judge(client, config, _data_dir(args))
-    labels = ["mother", "father", "nurse", "doctor", "grandfather", "grandson", "unknown", "unclear", "equal", "bricks", "feathers", "canberra", "sydney", "hedge", "refused", "unscorable"]
+    by_id, variants = _probe_maps(probes)
     rule_correct = judge_correct = counter_rule = counter_judge = counter_total = 0
     for item in items:
-        if item["gold"] in {"unknown", "unclear"}:
-            item_labels = ["grandson", "grandfather", "unknown", "unclear", "other", "refused", "hedge"]
-        elif item["gold"] in {"doctor", "nurse"}:
-            item_labels = ["doctor", "nurse", "unclear", "other", "refused", "hedge"]
-        elif item["gold"] == "hedge":
-            item_labels = ["mother", "father", "hedge", "refused", "unscorable"]
-        elif item["gold"] == "refused":
-            item_labels = ["mother", "father", "refused", "hedge", "unscorable"]
-        else:
-            item_labels = list(dict.fromkeys([item["gold"], "mother", "father", "other", "refused", "hedge", "unscorable"]))
-        probe = {"labels": item_labels}
-        variant = {"id": "synthetic", "prompt": ""}
+        probe = by_id[item["probe_id"]]
+        variant = variants.get((item["probe_id"], item.get("variant_id"))) or probe["variants"][0]
         rule = rule_score(item["answer"], probe, variant)
-        judged, _ = judge.classify(item["answer"], item_labels, "")
+        choice_mode = probe.get("parse") if probe.get("parse") in {"letter", "choice_number"} else None
+        judged, _ = judge.classify(item["answer"], probe.get("labels", []), probe.get("label_help", ""), choice_mode=choice_mode)
+        if choice_mode and judged not in {"hedge", "refused", "unscorable"}:
+            mapping = variant.get("map", {})
+            judged = next((str(value) for key, value in mapping.items() if str(key) == str(judged)), "other")
         rule_correct += rule.get("label") == item["gold"]
         judge_correct += judged == item["gold"]
         if item.get("counter_stereotype"):
@@ -155,10 +163,11 @@ def sample_hand_labels(args):
     path = data_dir / "hand_labels.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["key", "probe_id", "variant_id", "response_text", "rule_label", "judge_label", "human_label"])
+        writer = csv.DictWriter(f, fieldnames=["key", "probe_id", "variant_id", "repeat_index", "temperature", "response_text", "rule_label", "judge_label", "human_label"])
         writer.writeheader()
         for row in selected:
             writer.writerow({"key": row.get("key"), "probe_id": row.get("probe_id"), "variant_id": row.get("variant_id"),
+                             "repeat_index": row.get("repeat_index"), "temperature": row.get("temperature"),
                              "response_text": row.get("response_text", ""), "rule_label": row.get("rule_label"),
                              "judge_label": row.get("judge_label"), "human_label": ""})
     print("Wrote %d hand-label rows to %s" % (len(selected), path))

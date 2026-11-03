@@ -109,11 +109,17 @@ class MockClient:
     def _judge_text(self, prompt):
         import re
         try:
-            allowed_text = prompt.split("Allowed labels:", 1)[1].split(".", 1)[0]
+            allowed_text = prompt.split("Allowed labels or option tokens:", 1)[1].split("\n", 1)[0]
             allowed = [x.strip() for x in allowed_text.split(",")]
-            answer = prompt.split("Answer text: <<<", 1)[1].split(">>>", 1)[0].lower()
+            answer = prompt.split("Answer text: <<<", 1)[1].split(">>>", 1)[0].strip().lower()
         except (IndexError, ValueError):
             return json.dumps({"label": "unscorable"})
+        if "OPTION TOKEN only" in prompt:
+            tokens = [x for x in ("a", "b", "c", "d", "1", "2") if x in [item.lower() for item in allowed]]
+            for token in tokens:
+                if re.match(r"^%s(?:[.)\s]|$)" % re.escape(token), answer):
+                    return token.upper() if token.isalpha() else token
+            return "unscorable"
         if any(x in answer for x in ("i can't help", "i cannot help", "i'm unable", "i cannot provide", "i won't")):
             return json.dumps({"label": "refused"})
         if "unclear" in allowed and "unclear" in answer:
@@ -134,6 +140,9 @@ class MockClient:
             return json.dumps({"label": "father"})
         if "mother" in allowed and ("mom" in answer or " mum" in answer):
             return json.dumps({"label": "mother"})
+        for label in allowed:
+            if label not in {"other", "refused", "hedge", "unscorable"} and re.match(r"^(?:the )?%s[.!?](?:\s|$)" % re.escape(label.lower()), answer):
+                return json.dumps({"label": label})
         hits = [label for label in allowed if label not in {"other", "refused", "hedge", "unscorable"} and re.search(r"(?<!\w)%s(?!\w)" % re.escape(label.lower()), answer)]
         if len(hits) == 1:
             return json.dumps({"label": hits[0]})

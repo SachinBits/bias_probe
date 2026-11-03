@@ -42,6 +42,10 @@ class JsonlStore:
     def ok_keys(self):
         return {r["key"] for r in self.records() if r.get("status") == "ok" and r.get("key")}
 
+    def ok_task_keys(self):
+        return {(r.get("key"), r.get("probe_id"), r.get("variant_id"))
+                for r in self.records() if r.get("status") == "ok" and r.get("key")}
+
     def append(self, record):
         with self.lock:
             with self.path.open("a", encoding="utf-8") as f:

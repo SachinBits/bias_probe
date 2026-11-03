@@ -7,9 +7,11 @@ from pathlib import Path
 
 from probe.bank import load_probe_files
 from probe.client import MockClient
+from probe.client import ClientError
 from probe.config import load_config
-from probe.cli import score_models
-from probe.judge import Judge
+from probe.cli import sample_hand_labels, score_models
+from probe.judge import Judge, parse_judge_reply
+from probe.runner import run
 from probe.scorer import rule_score, score_response
 
 
@@ -62,6 +64,92 @@ class Phase2Tests(unittest.TestCase):
             with self.subTest(text=text):
                 self.assertEqual(rule_score(text, probe, variant)["label"], "0.05")
         self.assertEqual(rule_score("10 cents", probe, variant)["label"], "0.10")
+        for text in ("$.05", ".05", "$0.05", "5 cents", "five cents"):
+            with self.subTest(text=text):
+                self.assertEqual(rule_score(text, probe, variant)["label"], "0.05")
+        self.assertEqual(rule_score("$.10", probe, variant)["label"], "0.10")
+
+    def test_choice_failure_uses_judge_token_then_variant_map(self):
+        probe, variant = self.variant("pairwise-judge-order", "plain-first")
+        response = "2. Answer 1 is a more detailed and clear explanation"
+        self.assertIsNone(rule_score(response, probe, variant)["label"])
+        with tempfile.TemporaryDirectory() as td:
+            result = score_response(response, probe, variant, self.judge(td))
+        self.assertEqual(result["label"], "rayleigh")
+        self.assertEqual(result["source"], "judge")
+
+    def test_fenced_chatty_judge_reply_and_case_insensitive_label(self):
+        self.assertEqual(parse_judge_reply('Here you go:\n```json\n{"LaBeL": "father"}\n```', ["mother", "father"]), "father")
+        self.assertEqual(parse_judge_reply('The result is {"LABEL": "mother"}, with confidence.', ["mother", "father"]), "mother")
+
+    def test_judge_reuses_runner_retries_and_only_final_failure_is_error(self):
+        class EventuallyWorks:
+            def __init__(self):
+                self.calls = 0
+            def complete(self, *args, **kwargs):
+                self.calls += 1
+                if self.calls < 6:
+                    raise ClientError("temporary", True, 0)
+                return {"response_text": '{"label":"father"}', "model_returned": "j", "provider_returned": "mock"}
+        with tempfile.TemporaryDirectory() as td:
+            client = EventuallyWorks()
+            judge = Judge(client, load_config(), Path(td))
+            self.assertEqual(judge.classify("father", ["mother", "father"])[0], "father")
+            self.assertEqual(client.calls, 6)
+            record = json.loads(next((Path(td) / "judge").glob("*.jsonl")).read_text().splitlines()[0])
+            self.assertEqual(record["status"], "ok")
+            self.assertEqual(record["attempts"], 6)
+
+        class AlwaysFails:
+            def __init__(self):
+                self.calls = 0
+            def complete(self, *args, **kwargs):
+                self.calls += 1
+                raise ClientError("permanent", True, 0)
+        with tempfile.TemporaryDirectory() as td:
+            client = AlwaysFails()
+            judge = Judge(client, load_config(), Path(td))
+            self.assertEqual(judge.classify("father", ["mother", "father"])[0], "unscorable")
+            self.assertEqual(client.calls, 6)
+            self.assertEqual(judge.classify("father", ["mother", "father"])[0], "unscorable")
+            self.assertEqual(client.calls, 12)
+            records = [json.loads(x) for x in next((Path(td) / "judge").glob("*.jsonl")).read_text().splitlines()]
+            self.assertEqual(len(records), 2)
+            self.assertTrue(all(r["status"] == "error" for r in records))
+
+    def test_int_1_10_ignores_scale_numbers(self):
+        probe, variant = self.variant("name-swap-competence", "james")
+        self.assertEqual(rule_score("On a scale from 1 to 10, score 8 out of 10 (/10).", probe, variant)["label"], "8")
+
+    def test_identical_prompts_are_cached_per_probe_variant(self):
+        probes = [
+            {"id": "p1", "family": "control", "expect": "same", "labels": ["yes"], "why": "test", "variants": [{"id": "v1", "prompt": "same prompt"}, {"id": "v2", "prompt": "same prompt"}]},
+            {"id": "p2", "family": "control", "expect": "same", "labels": ["yes"], "why": "test", "variants": [{"id": "v1", "prompt": "same prompt"}, {"id": "v2", "prompt": "same prompt"}]},
+        ]
+        config = {"models": [{"id": "test/model", "provider": None}], "schedule": [{"temperature": 0.7, "repeats": 1}], "max_tokens": 10, "concurrency": 2, "spend_cap_usd": 3.0, "seed": 7}
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            first = run(config, probes, MockClient(probes, seed=7, simulate_errors=False), data, None, None, False)
+            second = run(config, probes, MockClient(probes, seed=7, simulate_errors=False), data, None, None, False)
+            self.assertEqual(first["written"], 4)
+            self.assertEqual(second["written"], 0)
+            records = [json.loads(x) for x in (data / "responses" / "test__model.jsonl").read_text().splitlines()]
+            self.assertEqual({r["probe_id"] for r in records}, {"p1", "p2"})
+
+    def test_hand_labels_include_full_response_identity(self):
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            labels = data / "labels" / "test.jsonl"
+            labels.parent.mkdir(parents=True, exist_ok=True)
+            labels.write_text(json.dumps({"key": "k", "probe_id": "p", "variant_id": "v", "repeat_index": 3,
+                                          "temperature": 0.7, "response_text": "mother", "rule_label": "mother", "judge_label": None}) + "\n", encoding="utf-8")
+            args = type("Args", (), {"data_dir": str(data), "mock": True, "n": 1})()
+            sample_hand_labels(args)
+            header = (data / "hand_labels.csv").read_text(encoding="utf-8").splitlines()[0]
+            self.assertIn("probe_id", header)
+            self.assertIn("variant_id", header)
+            self.assertIn("repeat_index", header)
+            self.assertIn("temperature", header)
 
     def test_hedge_and_uncertainty_content_label_are_distinct(self):
         surgeon, surgeon_variant = self.variant("surgeon-riddle", "original")
@@ -97,10 +185,16 @@ class Phase2Tests(unittest.TestCase):
             response_path.parent.mkdir(parents=True, exist_ok=True)
             response_path.write_text(json.dumps({"key": "k", "status": "ok", "model_requested": "test/model",
                                                   "probe_id": probe["id"], "variant_id": variant["id"],
-                                                  "params": {"temperature": 0.7}, "repeat_index": 0,
-                                                  "response_text": "Mother."}) + "\n", encoding="utf-8")
-            config = {"models": [{"id": "test/model"}], "judge": {"id": "judge/model", "max_tokens": 80}, "seed": 7}
-            score_models(type("Args", (), {"data_dir": str(data), "mock": True, "models": None})(), config, [probe], MockClient([probe], seed=7, simulate_errors=False))
+                                                  "params": {"temperature": 0.7, "provider": None, "max_tokens": 300}, "repeat_index": 0,
+                                                  "response_text": "Mother."}) + "\n" + json.dumps({"key": "old", "status": "ok", "model_requested": "test/model",
+                                                  "probe_id": probe["id"], "variant_id": variant["id"],
+                                                  "params": {"temperature": 0.7, "provider": ["old-provider"], "max_tokens": 300}, "repeat_index": 1,
+                                                  "response_text": "Father."}) + "\n", encoding="utf-8")
+            config = {"models": [{"id": "test/model", "provider": None}], "judge": {"id": "judge/model", "max_tokens": 80}, "schedule": [{"temperature": 0.7, "repeats": 1}], "max_tokens": 300, "seed": 7}
+            output = io.StringIO()
+            with redirect_stdout(output):
+                score_models(type("Args", (), {"data_dir": str(data), "mock": True, "models": None})(), config, [probe], MockClient([probe], seed=7, simulate_errors=False))
+            self.assertIn("superseded=1", output.getvalue())
             record = json.loads((data / "labels" / "test__model.jsonl").read_text(encoding="utf-8").splitlines()[0])
             for field in ("key", "probe_id", "variant_id", "model", "temperature", "repeat_index", "label", "source", "detail", "scorer_version", "judge_prompt_version"):
                 self.assertIn(field, record)

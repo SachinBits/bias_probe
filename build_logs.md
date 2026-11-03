@@ -112,3 +112,34 @@ This file is append-only. Each completed implementation phase and review update 
 - `python3 -m probe sample-hand-labels --n 60 --mock` → wrote 60 stratified rows.
 - `python3 -m probe check-scorer --mock` → correctly reported that no human labels had been filled yet.
 - No real API calls were made and `data/` was not modified.
+
+## Phase 2.5 Review Fixes and Data Fixes
+
+### Scorer and judge fixes
+
+- Choice probes now send unresolved responses to the judge for an option token only (`A`–`D` or `1`–`2`); the scorer maps that token through the variant’s map.
+- Amount parsing now accepts `$.05`, `.05`, `$0.05`, `5 cents`, `five cents`, and `$.10`.
+- Judge reply parsing now removes code fences, extracts the first JSON object, and accepts `label` with any capitalization.
+- Judge requests now reuse the runner’s six-attempt retry/backoff policy. Only the final failure is written as an error record, and error records are not treated as successful cache hits.
+- Judge prompts format descriptions as `label: description` lines.
+- `int_1_10` parsing ignores scale/range notation such as `1 to 10`, `1-10`, `out of 10`, and `/10`.
+- Judge-test fixtures now all carry real `probe_id` values and use real probe labels and `label_help`; the fixture contains 36 cases, including 11 counter-stereotype cases and the new amount, pairwise-choice, surgeon-conflict, BBQ, and WinoBias examples.
+
+### Data and cache fixes
+
+- Runner cache completion now requires an `ok` record matching `(key, probe_id, variant_id)`, while the cache-key formula remains unchanged.
+- This prevents two probes with identical prompts from incorrectly sharing one cached response.
+- Label records retain the full response identity fields: `key`, `probe_id`, `variant_id`, `repeat_index`, and `temperature`.
+- `hand_labels.csv` now includes `repeat_index` and `temperature` alongside the probe and variant identifiers.
+- Scoring accepts only response records matching the current model, provider, scheduled temperature, and max-token configuration; mismatches are counted as `superseded`.
+- Set the Llama 3.1 8B model provider in `config.json` to `["deepinfra"]`; GPT-4o-mini configuration was unchanged.
+- Existing `data/responses/` content and pre-existing bank edits were preserved and not rewritten.
+
+### Verification
+
+- `python3 -m unittest` → 26 tests passed.
+- `python3 -m probe run --mock` → 780 new provider-specific records written and 780 existing tasks skipped.
+- `python3 -m probe score --mock` → current records scored; 780 superseded records reported for the prior Llama provider configuration.
+- `python3 -m probe judge-test --mock` → rule accuracy `22/36 (61.1%)`; judge accuracy `33/36 (91.7%)`; counter-stereotype judge accuracy `10/11 (90.9%)`.
+- `python3 -m probe sample-hand-labels --n 60 --mock` → hand-label identity includes key, probe, variant, repeat, and temperature fields.
+- No real API calls were made and `data/responses/` was not modified.
