@@ -212,7 +212,8 @@ th { background:var(--head); font-size:12.5px; font-weight:600; color:var(--fg);
 details { min-width:0; } summary { cursor:pointer; }
 main > details { border:1px solid var(--line); border-radius:10px; margin:12px 0; padding:0 18px; } main > details:first-of-type { margin-top:32px; } main > details > summary { font-size:14px; font-weight:650; padding:13px 0; } main > details[open] { padding-bottom:14px; } main > details > section > h2:first-child { display:none; } main > details h2 { font-size:14px; margin:20px 0 8px; } main > details h3 { margin-top:18px; }
 .prompts h2 { margin-top:0; } .prompt-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px; } .prompt { background:#f6f6fb; border-radius:10px; padding:13px 15px; min-width:0; } .prompt-head { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 12px; margin-bottom:6px; font-size:12.5px; font-weight:650; } .prompt-head span { color:var(--muted); font-weight:500; } .prompt p { margin:0; white-space:pre-line; overflow-wrap:anywhere; }
-.probe-model-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:0; margin-top:8px; } .probe-model { min-width:0; } .probe-model-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:6px; } .probe-model-head h3 { margin:0; font-size:15px; } .stat-line { color:var(--muted); font-size:12.5px; margin:0 0 2px; } .stats { margin-bottom:12px; }
+.probe-model-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:0; margin-top:8px; } .probe-model { min-width:0; } .probe-model-head { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-bottom:5px; } .probe-model-head h3 { margin:0; font-size:15px; } .exact-verdict { color:var(--muted); font-size:11.5px; font-weight:500; } .summary-line { color:var(--fg); font-size:13px; margin:0 0 8px; }
+.statistics { margin:0 0 10px; color:var(--muted); font-size:12px; } .statistics summary { color:var(--accent); } .statistics p { margin:5px 0 0; }
 .result-table td { vertical-align:middle; } .result-table .variant-name { font-weight:600; } .result-table .dist { width:46%; min-width:220px; } .result-table td:not(.dist) { white-space:nowrap; }
 .raw-group { border-top:1px solid var(--line); } .raw-group:first-of-type { margin-top:8px; } .raw-group > summary { padding:9px 0; font-size:13px; font-weight:550; color:var(--accent); } .raw-group[open] { padding-bottom:8px; }
 .raw { border:1px solid var(--line); border-radius:7px; margin:4px 0; } .raw > summary { display:flex; flex-wrap:wrap; gap:4px 12px; padding:7px 11px; font-size:12.5px; } .raw-label { font-weight:650; } .raw-meta { color:var(--muted); } .raw pre { padding:10px 11px; border-top:1px solid var(--line); background:#fafafc; } .raw-source { margin:0; padding:7px 11px; border-top:1px solid var(--line); color:var(--muted); font-size:11.5px; overflow-wrap:anywhere; }
@@ -272,8 +273,7 @@ def _p_text(probe, statistic):
     def sig3(value):
         return "n/a" if value is None else "%.3g" % float(value)
     if probe.get("expect") == "trap" and statistic.get("fisher_p") is not None:
-        return "p(permutation)=%s; p(Fisher)=%s; q=%s" % (sig3(statistic.get("p_value")),
-                                                          sig3(statistic.get("fisher_p")), sig3(statistic.get("q_value")))
+        return "p(Fisher)=%s; q=%s" % (sig3(statistic.get("fisher_p")), sig3(statistic.get("q_value")))
     return "p=%s; q=%s" % (sig3(statistic.get("verdict_p")), sig3(statistic.get("q_value")))
 
 
@@ -830,7 +830,7 @@ def _matrix_metric_text(probe, statistic):
         return "%d/%d → %d/%d correct" % (statistic.get("original_correct", 0), statistic.get("original_total", 0),
                                            statistic.get("changed_correct", 0), statistic.get("changed_total", 0))
     if probe.get("parse") == "int_1_10":
-        means = ["%s %.1f" % (_simple_variant_name(item.get("variant_id")), item["mean"])
+        means = ["%s %.1f" % (item.get("variant_id"), item["mean"])
                  for item in statistic.get("variants", []) if item.get("mean") is not None]
         return " · ".join(means) or "no numeric answers"
     if len(statistic.get("variants", [])) == 2:
@@ -884,7 +884,7 @@ def _probe_model_card(probe, statistic, rows, model_label):
     identity = lambda row: (row.get("key"), row.get("probe_id"), row.get("variant_id"), row.get("repeat_index"),
                             (row.get("params") or {}).get("temperature"))
     labels = {identity(row): (row.get("label_record") or {}) for row in rows}
-    table_rows = ["<tr><th>Variant</th><th>Expected</th><th>Answers</th><th>Accuracy</th><th>T=0</th></tr>"]
+    table_rows = ["<tr><th>Variant</th><th>Expected</th><th>Answers</th><th>Correct</th><th>T=0</th></tr>"]
     raw_groups = []
     for item, variant in zip(statistic.get("variants", []), probe.get("variants", [])):
         expected = variant.get("answer", probe.get("answer"))
@@ -892,25 +892,44 @@ def _probe_model_card(probe, statistic, rows, model_label):
         t0 = Counter(labels.get(identity(row), {}).get("label", "unscorable") for row in rows
                      if row.get("variant_id") == variant.get("id") and (row.get("params") or {}).get("temperature") == 0.0)
         raw = [row for row in rows if row.get("variant_id") == variant.get("id")]
-        accuracy = fraction(item.get("correct", 0), (item.get("correct", 0) or 0) + (item.get("wrong", 0) or 0)) if item.get("accuracy") is not None else "n/a"
+        correct = "%d/%d" % (item.get("correct", 0), item.get("total", 0)) if item.get("accuracy") is not None else "n/a"
         table_rows.append("<tr><td class='variant-name'>%s</td><td>%s</td><td class='dist'>%s</td><td>%s</td><td>%s</td></tr>" %
                           (_e(variant.get("id")), _e(expected or "n/a"),
                            _share_bars(item.get("counts", {}), item.get("total", 0), expected, pattern),
-                           _e(accuracy), _format_label_counts(t0)))
+                           _e(correct), _format_label_counts(t0)))
         raw_groups.append("<details class='raw-group'><summary>Raw responses · %s (%d)</summary>%s</details>" %
                           (_e(variant.get("id")), len(raw), _raw_details(raw, labels)))
-    return ("<article class='card probe-model'><div class='probe-model-head'><h3>%s</h3>%s</div>"
-            "<div class='stats'><p class='stat-line'>%s</p><p class='stat-line'>%s</p></div>%s%s</article>" %
-            (_e(model_label), _verdict_text(statistic), _metric_text(probe, statistic), _p_text(probe, statistic),
+    verdict = statistic.get("verdict") or "UNSCORABLE"
+    if verdict in OUTCOMES:
+        outcome_word = OUTCOMES[verdict][0]
+        outcome = _outcome_chip(outcome_word, title=verdict)
+    else:
+        outcome = _outcome_chip("OK", title=verdict)
+    summary = _probe_summary_text(probe, statistic)
+    statistics = "<details class='statistics'><summary>Statistics</summary><p>%s</p></details>" % _e(_p_text(probe, statistic))
+    return ("<article class='card probe-model'><div class='probe-model-head'><h3>%s</h3>%s<small class='exact-verdict'>%s</small></div>"
+            "<p class='summary-line'>%s</p>%s%s%s</article>" %
+            (_e(model_label), outcome, _e(verdict), _e(summary), statistics,
              _table("".join(table_rows), "result-table"), "".join(raw_groups)))
+
+
+def _probe_summary_text(probe, statistic):
+    if probe.get("expect") == "trap":
+        return "Correct: %d/%d → %d/%d" % (statistic.get("original_correct", 0), statistic.get("original_total", 0),
+                                           statistic.get("changed_correct", 0), statistic.get("changed_total", 0))
+    if probe.get("parse") == "int_1_10":
+        means = ["%s %.1f" % (_simple_variant_name(item.get("variant_id")), item["mean"])
+                 for item in statistic.get("variants", []) if item.get("mean") is not None]
+        return "%s (mean score)" % " · ".join(means) if means else "No numeric answers"
+    return _matrix_metric_text(probe, statistic)
 
 
 def _prompt_block(probe):
     items = []
     for variant in probe.get("variants", []):
         expected = variant.get("answer", probe.get("answer"))
-        expected_text = "<span>expected: %s</span>" % _e(expected) if expected else ""
-        items.append("<div class='prompt'><div class='prompt-head'>%s%s</div><p>%s</p></div>" %
+        expected_text = "<span class='expected-label'>expected: %s</span>" % _e(expected) if expected is not None else ""
+        items.append("<div class='prompt'><div class='prompt-head'><strong class='variant-label'>%s</strong>%s</div><p>%s</p></div>" %
                      (_e(variant.get("id")), expected_text, _e(variant.get("prompt"))))
     return "<section class='prompts'><h2>Prompts</h2><div class='prompt-grid'>%s</div></section>" % "".join(items)
 
@@ -980,17 +999,18 @@ def _live_page(config, example_probe=None, probes=None):
 var form=document.getElementById("live-form"), variants=document.getElementById("variants"), progress=document.getElementById("progress"), result=document.getElementById("live-result"), probeSelect=document.getElementById("pid"), customProbeId=document.getElementById("custom-pid"), baseProbe={};
 var example=JSON.parse(document.getElementById("example-data").textContent), defaultSchedule=JSON.parse(document.getElementById("config-data").textContent), probeCatalog=JSON.parse(document.getElementById("probe-data").textContent);
 function input(className, placeholder, value){var node=document.createElement("input");node.className=className;node.placeholder=placeholder;node.value=value == null ? "" : String(value);return node}
-function row(value){var v=value || {}, d=document.createElement("div");d.className="variant-form";var id=input("vid","variant id",v.id), prompt=document.createElement("textarea"), answer=input("va","expected answer",v.answer), map=input("vm","A=29, B=21","");prompt.className="vp";prompt.placeholder="prompt";prompt.value=v.prompt || "";map.value=Object.keys(v.map || {}).map(function(k){return k+"="+v.map[k]}).join(", ");var remove=document.createElement("button");remove.type="button";remove.className="button remove";remove.textContent="Remove";remove.onclick=function(){d.remove()};d.append(id,prompt,answer,map,remove);variants.appendChild(d)}
+function updateEstimate(){var variantCount=variants.querySelectorAll(".variant-form").length, repeats=0, models=document.querySelectorAll("input[name=model]:checked").length;document.querySelectorAll(".schedule-row").forEach(function(d){var raw=d.querySelector(".sr").value.trim();if(raw !== ""){var value=Number(raw);if(Number.isFinite(value)&&value>0)repeats+=value}});progress.textContent="~"+(variantCount*repeats*models)+" calls"}
+function row(value){var v=value || {}, d=document.createElement("div");d.className="variant-form";var id=input("vid","variant id",v.id), prompt=document.createElement("textarea"), answer=input("va","expected answer",v.answer), map=input("vm","A=29, B=21","");prompt.className="vp";prompt.placeholder="prompt";prompt.value=v.prompt || "";map.value=Object.keys(v.map || {}).map(function(k){return k+"="+v.map[k]}).join(", ");var remove=document.createElement("button");remove.type="button";remove.className="button remove";remove.textContent="Remove";remove.onclick=function(){d.remove();updateEstimate()};d.append(id,prompt,answer,map,remove);variants.appendChild(d);updateEstimate()}
 function parseMap(value){var output={};value.split(",").forEach(function(part){var pair=part.split("=");if(pair.length===2)output[pair[0].trim()]=pair.slice(1).join("=").trim()});return output}
-function setProbe(probe, id){baseProbe=JSON.parse(JSON.stringify(probe));var selectedId=id == null ? probe.id : id;probeSelect.value=selectedId;customProbeId.hidden=selectedId !== "__custom__";customProbeId.required=selectedId === "__custom__";if(selectedId === "__custom__")customProbeId.value=probe.id || "";document.getElementById("family").value=probe.family || "familiar-pattern";document.getElementById("expect").value=probe.expect || "same";document.getElementById("parse").value=probe.parse || "";document.getElementById("labels").value=(probe.labels || []).join(", ");document.getElementById("why").value=probe.why || "";variants.replaceChildren();(probe.variants || []).forEach(row)}
+function setProbe(probe, id){baseProbe=JSON.parse(JSON.stringify(probe));var selectedId=id == null ? probe.id : id;probeSelect.value=selectedId;customProbeId.hidden=selectedId !== "__custom__";customProbeId.required=selectedId === "__custom__";if(selectedId === "__custom__")customProbeId.value=probe.id || "";document.getElementById("family").value=probe.family || "familiar-pattern";document.getElementById("expect").value=probe.expect || "same";document.getElementById("parse").value=probe.parse || "";document.getElementById("labels").value=(probe.labels || []).join(", ");document.getElementById("why").value=probe.why || "";variants.replaceChildren();(probe.variants || []).forEach(row);updateEstimate()}
 function selectedProbeId(){return probeSelect.value === "__custom__" ? customProbeId.value.trim() : probeSelect.value}
 function build(){var list=[];variants.querySelectorAll(".variant-form").forEach(function(d){var v={id:d.querySelector(".vid").value,prompt:d.querySelector(".vp").value}, answer=d.querySelector(".va").value, map=parseMap(d.querySelector(".vm").value);if(answer)v.answer=answer;if(Object.keys(map).length)v.map=map;list.push(v)});var probe=Object.assign({},baseProbe,{id:selectedProbeId(),family:document.getElementById("family").value,expect:document.getElementById("expect").value,labels:document.getElementById("labels").value.split(",").map(function(x){return x.trim()}).filter(Boolean),why:document.getElementById("why").value,variants:list});var parse=document.getElementById("parse").value;if(parse)probe.parse=parse;else delete probe.parse;var schedule=[];document.querySelectorAll(".schedule-row").forEach(function(d){var rawTemperature=d.querySelector(".st").value.trim(),rawRepeats=d.querySelector(".sr").value.trim();schedule.push({temperature:rawTemperature === "" ? null : Number(rawTemperature),repeats:rawRepeats === "" ? null : Number(rawRepeats)})});return {probe:probe,models:Array.from(document.querySelectorAll("input[name=model]:checked")).map(function(x){return x.value}),schedule:schedule}}
 function text(tag, value){var node=document.createElement(tag);node.textContent=value;return node}
-function render(data){result.replaceChildren(text("h2","Result"));if(data.html){var block=document.createElement("div");block.innerHTML=data.html;result.appendChild(block)}var save=document.createElement("button");save.className="button";save.textContent="Save to probes/custom.json";save.onclick=function(){fetch("/api/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({probe:data.probe})}).then(function(x){return x.json()}).then(function(x){alert(x.ok ? "Saved" : x.error)})};result.appendChild(save)}
+function render(data){result.innerHTML=data.html || "";var save=document.createElement("button");save.className="button";save.textContent="Save to probes/custom.json";save.onclick=function(){fetch("/api/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({probe:data.probe})}).then(function(x){return x.json()}).then(function(x){alert(x.ok ? "Saved" : x.error)})};result.appendChild(save)}
 function disableForm(){form.querySelectorAll("input,select,textarea,button").forEach(function(node){node.disabled=true})}
-document.getElementById("add-variant").onclick=function(){row()};document.getElementById("example").onclick=function(){setProbe(Object.assign({},example,{id:"demo-surgeon-riddle"}),"__custom__")};probeSelect.onchange=function(){var selected=probeCatalog.find(function(item){return item.id===probeSelect.value});if(selected)setProbe(selected,selected.id);else if(probeSelect.value === "__custom__"){baseProbe={};customProbeId.hidden=false;customProbeId.required=true;customProbeId.focus()}else{baseProbe={};customProbeId.hidden=true;customProbeId.required=false}};
+document.getElementById("add-variant").onclick=function(){row()};document.getElementById("example").onclick=function(){setProbe(Object.assign({},example,{id:"demo-surgeon-riddle"}),"__custom__")};probeSelect.onchange=function(){var selected=probeCatalog.find(function(item){return item.id===probeSelect.value});if(selected)setProbe(selected,selected.id);else if(probeSelect.value === "__custom__"){baseProbe={};customProbeId.hidden=false;customProbeId.required=true;customProbeId.focus();updateEstimate()}else{baseProbe={};customProbeId.hidden=true;customProbeId.required=false;updateEstimate()}};form.oninput=updateEstimate;form.onchange=updateEstimate;
 form.onsubmit=function(event){event.preventDefault();var payload=build();fetch("/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(function(x){return x.json()}).then(function(x){if(x.error){result.replaceChildren(text("p",x.error));return}var id=x.job_id,timer=setInterval(function(){fetch("/api/jobs/"+id).then(function(y){return y.json()}).then(function(job){progress.textContent="Calls "+job.done+"/"+job.total+" · errors "+job.errors+" · spend $"+Number(job.spend || 0).toFixed(4);if(job.total)document.querySelector(".progress-fill").style.width=Math.min(100,100*job.done/job.total)+"%";if(job.status==="finished"){clearInterval(timer);render(job.result)}if(job.status==="error"){clearInterval(timer);result.replaceChildren(text("p",job.error))}})},1000)}).catch(function(error){result.replaceChildren(text("p",String(error)))})};
-document.getElementById("schedule").replaceChildren.apply(document.getElementById("schedule"),defaultSchedule.map(function(item){var d=document.createElement("div"),temperature=input("st","",item.temperature),repeats=input("sr","",item.repeats);d.className="schedule-row form-grid";temperature.type="number";temperature.step="0.1";repeats.type="number";repeats.min="1";var t=document.createElement("label"),r=document.createElement("label");t.append("Temperature",temperature);r.append("Repeats",repeats);d.append(t,r);return d}));
+document.getElementById("schedule").replaceChildren.apply(document.getElementById("schedule"),defaultSchedule.map(function(item){var d=document.createElement("div"),temperature=input("st","",item.temperature),repeats=input("sr","",item.repeats);d.className="schedule-row form-grid";temperature.type="number";temperature.step="0.1";repeats.type="number";repeats.min="1";var t=document.createElement("label"),r=document.createElement("label");t.append("Temperature",temperature);r.append("Repeats",repeats);d.append(t,r);return d}));updateEstimate();
 fetch("/api/health").catch(function(){disableForm()});
 })();
     </script>"""

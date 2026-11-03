@@ -42,7 +42,7 @@ byId.example.onclick();
 var missing=[select.value===""&&"pid",byId["custom-pid"].required&&byId["custom-pid"].value===""&&"custom-pid",byId.labels.value===""&&"labels"].filter(Boolean);
 if(missing.length){console.error("form not submittable: "+missing.join(","));process.exit(1)}
 byId["live-form"].onsubmit({preventDefault:function(){}});
-console.log(JSON.stringify({select:select.value,custom:byId["custom-pid"].value,customHidden:byId["custom-pid"].hidden,customRequired:byId["custom-pid"].required,payload:posted[0]}));
+console.log(JSON.stringify({select:select.value,custom:byId["custom-pid"].value,customHidden:byId["custom-pid"].hidden,customRequired:byId["custom-pid"].required,estimate:byId.progress.textContent,payload:posted[0]}));
 process.exit(0);
 """
 
@@ -96,6 +96,10 @@ class Phase5DashboardTests(unittest.TestCase):
             for probe in self.probes:
                 self.assertIn("probes/%s.html" % probe["id"], text)
                 self.assertTrue((output / "probes" / (probe["id"] + ".html")).exists())
+            surgeon_page = (output / "probes" / "surgeon-riddle.html").read_text(encoding="utf-8")
+            self.assertIn("Correct: 10/10 → 0/10", surgeon_page)
+            self.assertIn("<th>Correct</th>", surgeon_page)
+            self.assertIn("<summary>Statistics</summary>", surgeon_page)
             self.assertIn("verdict-badge", text)
             self.assertIn("@media (max-width:700px)", text)
 
@@ -171,6 +175,7 @@ class Phase5DashboardTests(unittest.TestCase):
         self.assertFalse(state["customHidden"])
         self.assertTrue(state["customRequired"])
         self.assertEqual(state["custom"], "demo-surgeon-riddle")
+        self.assertEqual(state["estimate"], "~26 calls")
         self.assertEqual(state["payload"]["probe"]["id"], "demo-surgeon-riddle")
         validate_probe(state["payload"]["probe"], "test")
 
@@ -271,6 +276,13 @@ class Phase5DashboardTests(unittest.TestCase):
             self.assertIn("class='bar", job["result"]["html"])
             self.assertIn("Raw responses", job["result"]["html"])
             self.assertNotIn('"counts"', job["result"]["html"])
+            single_config = json.loads(json.dumps(self.config))
+            single_config["models"] = [single_config["models"][0]]
+            static_reports = Path(tmp) / "static-reports"
+            build_report(single_config, [probe], Path(tmp) / "data_live", static_reports, mock=True)
+            static_html = (static_reports / "probes" / (probe["id"] + ".html")).read_text(encoding="utf-8")
+            for marker in ("class='prompts'", "class='probe-model-grid'", "class='result-table'", "class='statistics'", "class='raw-group'"):
+                self.assertEqual(job["result"]["html"].count(marker), static_html.count(marker), marker)
             response_path = Path(tmp) / "data_live" / "responses" / (self.config["models"][0]["id"].replace("/", "__") + ".jsonl")
             response_rows = [json.loads(line) for line in response_path.read_text(encoding="utf-8").splitlines()]
             self.assertTrue(any(row["params"]["temperature"] == 0.0 and isinstance(row["params"]["temperature"], float)
