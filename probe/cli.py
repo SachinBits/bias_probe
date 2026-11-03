@@ -1,4 +1,4 @@
-"""Command-line interface for Phase 1."""
+"""Command-line interface for the bias probe pipeline."""
 from __future__ import annotations
 
 import argparse
@@ -13,6 +13,7 @@ from .client import MockClient, OpenRouterClient
 from .config import load_config, model_slug
 from .judge import Judge
 from .runner import run
+from .report import build_report
 from .scorer import JUDGE_PROMPT_VERSION, SCORER_VERSION, contains_unnegated_label, rule_score, score_response
 from .store import JsonlStore
 
@@ -27,11 +28,14 @@ def _parser():
         sp.add_argument("--mock", action="store_true")
         sp.add_argument("--dry-run", action="store_true")
         sp.add_argument("--data-dir")
-    for name in ("score", "judge-test"):
+    for name in ("score", "judge-test", "report", "all"):
         sp = sub.add_parser(name)
         sp.add_argument("--mock", action="store_true")
         sp.add_argument("--data-dir")
         sp.add_argument("--models")
+        if name == "all":
+            sp.add_argument("--probes")
+            sp.add_argument("--dry-run", action="store_true")
     sp = sub.add_parser("sample-hand-labels")
     sp.add_argument("--n", type=int, default=60)
     sp.add_argument("--mock", action="store_true")
@@ -252,6 +256,22 @@ def main(argv=None):
         return
     if args.command == "check-scorer":
         check_scorer(args)
+        return
+    if args.command == "report":
+        data_dir = _data_dir(args)
+        path = build_report(config, probes, data_dir, "reports", args.mock)
+        print("Report written to %s" % path)
+        return
+    if args.command == "all":
+        data_dir = _data_dir(args)
+        if not args.mock and not os.environ.get("OPENROUTER_API_KEY"):
+            raise SystemExit("OPENROUTER_API_KEY is required (use --mock for offline testing)")
+        client = MockClient(probes, config["seed"]) if args.mock else OpenRouterClient(os.environ["OPENROUTER_API_KEY"])
+        run(config, probes, client, data_dir, model_ids, probe_ids, args.dry_run)
+        if not args.dry_run:
+            score_models(args, config, probes, client)
+            path = build_report(config, probes, data_dir, "reports", args.mock)
+            print("Report written to %s" % path)
         return
     data_dir = Path(args.data_dir or ("data_mock" if args.mock else "data"))
     if not args.mock and not os.environ.get("OPENROUTER_API_KEY"):

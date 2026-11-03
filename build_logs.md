@@ -144,6 +144,31 @@ This file is append-only. Each completed implementation phase and review update 
 - `python3 -m probe sample-hand-labels --n 60 --mock` → hand-label identity includes key, probe, variant, repeat, and temperature fields.
 - No real API calls were made and `data/responses/` was not modified.
 
+## Phase 3 — Statistics and static reporting
+
+### Implemented
+
+- Added `probe/stats.py` with configuration-filtered response loading, per-variant label counts and modal shares, content-label accuracy, refusal/hedge/unscorable counts, numeric mean and standard deviation, movement (`D_between - D_within`), seeded permutation tests, one-sided Fisher exact tests, pattern capture, social stereotype rates, Benjamini–Hochberg q-values, exact AGENTS.md verdict names, and the 10-vs-10 minimum-detectable-effect reference.
+- Added `probe/report.py` to generate offline `reports/index.html` plus one page per configured model. Reports use inline CSS with light/dark support, include a red MOCK banner, raw-count percentages, requested/returned model and provider counts, date range, schedule, costs, superseded records, surgeon headline comparison, family/model summaries, scorer-source counts, and every current raw response with file and line references inside `<details>`.
+- Added CLI commands `report` and `all`; `all --mock` runs the cached mock pipeline, scoring, and report generation without network access.
+- Added `SCORING_POLICY.md` with the required probe-level verdict limitation wording and the scoring/statistics policy.
+- Added Phase 3 unit tests for Fisher, permutation tests, BH correction, handmade verdicts, and offline static report generation.
+
+### Important decisions
+
+- Only successful response records matching the current model, provider, scheduled temperature, and max-token configuration contribute to statistics. Superseded and failed records are reported separately.
+- `unknown` and `unclear` remain content labels; only `hedge`, `refused`, and `unscorable` are excluded from accuracy denominators.
+- The report is fully static and offline: no JavaScript framework, CDN, or API call is required.
+- Raw response files remain append-only and `data/responses/` was not modified.
+
+### Verification
+
+- `python3 -m unittest` → 35 tests passed.
+- `python3 -m probe all --mock` → completed with cached responses, scored both configured models, and wrote `reports/index.html` plus model pages.
+- `python3 -m probe report` → built the real-data report offline from existing records; no API call was made.
+- Fisher reference: `10/10 vs 3/10` → `0.0015479876`; permutation tests returned `1.0` for identical inputs and a small p-value for `10/10 vs 0/10`; BH known example matched expected q-values.
+- No real API calls were made and `data/responses/` was not modified.
+
 ## Phase 2.6 Scorer Fixes
 
 ### Scoring and judge changes
