@@ -62,8 +62,11 @@ python3 -m probe score
 python3 -m probe report
 ```
 
-Fallback judge calls are cached separately, so an already-judged response is not
-charged again. To reproduce everything offline, use `--mock` and `data_mock/`.
+No API key is needed for these offline commands. Fallback judge calls are cached
+separately, so an already-judged response is not charged again. If a response
+needs a judge result that is not cached and no key is available, it is reported
+as unscorable and the run continues. To reproduce everything offline with
+synthetic data, use `--mock` and `data_mock/`.
 
 ## Add a probe pair
 

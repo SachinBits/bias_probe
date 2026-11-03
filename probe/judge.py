@@ -7,6 +7,7 @@ import json
 import re
 
 from .config import model_slug
+from .client import MissingAPIKeyError
 from .runner import complete_with_retries
 from .scorer import JUDGE_PROMPT_VERSION
 from .store import JsonlStore
@@ -112,6 +113,8 @@ class Judge:
                       "provider_returned": result.get("provider_returned"), "response_id": result.get("response_id")}
             self.store.append(record)
             return label, "judge option token" if tokens else "judge JSON label"
+        except MissingAPIKeyError:
+            return "unscorable", "judge not cached and no API key"
         except Exception as exc:
             record = {"key": key, "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                       "judge_prompt_version": JUDGE_PROMPT_VERSION, "model": self.judge.get("id"),

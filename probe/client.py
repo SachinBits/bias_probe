@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import random
+import sys
 import time
 import urllib.error
 import urllib.request
@@ -14,6 +16,35 @@ class ClientError(Exception):
         super().__init__(message)
         self.retryable = retryable
         self.retry_after = retry_after
+
+
+class MissingAPIKeyError(ClientError):
+    """Raised only when an uncached call needs a key that is not configured."""
+
+    def __init__(self):
+        super().__init__("OPENROUTER_API_KEY is not set", retryable=False)
+
+
+class LazyOpenRouterClient:
+    """Construct the network client only when an uncached call is needed."""
+
+    def __init__(self, key_getter=None):
+        self.key_getter = key_getter or (lambda: os.environ.get("OPENROUTER_API_KEY", ""))
+        self._client = None
+        self._warned = False
+        self.complete_calls = 0
+
+    def complete(self, *args, **kwargs):
+        if self._client is None:
+            key = self.key_getter()
+            if not key:
+                if not self._warned:
+                    print("Warning: judge not cached and no API key; affected answers are unscorable.", file=sys.stderr)
+                    self._warned = True
+                raise MissingAPIKeyError()
+            self._client = OpenRouterClient(key)
+        self.complete_calls += 1
+        return self._client.complete(*args, **kwargs)
 
 
 class OpenRouterClient:

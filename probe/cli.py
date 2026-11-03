@@ -10,7 +10,7 @@ from collections import defaultdict
 from pathlib import Path
 
 from .bank import BankError, load_probe_files, validate_probe
-from .client import MockClient, OpenRouterClient
+from .client import LazyOpenRouterClient, MockClient, OpenRouterClient
 from .config import load_config, model_slug
 from .judge import Judge
 from .runner import run
@@ -54,10 +54,7 @@ def _make_client(args, probes, config):
         return None
     if args.mock:
         return MockClient(probes, config["seed"], simulate_errors=False)
-    key = os.environ.get("OPENROUTER_API_KEY")
-    if not key:
-        raise SystemExit("OPENROUTER_API_KEY is required (use --mock for offline testing)")
-    return OpenRouterClient(key)
+    return LazyOpenRouterClient()
 
 
 def _data_dir(args):

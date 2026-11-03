@@ -1,16 +1,19 @@
 import io
 import json
+import os
 import tempfile
 import unittest
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 from probe.bank import load_probe_files
-from probe.client import MockClient
+from probe.client import LazyOpenRouterClient, MockClient
 from probe.client import ClientError
 from probe.config import load_config
-from probe.cli import run_judge_tests, sample_hand_labels, score_models
+from probe.cli import _make_client, run_judge_tests, sample_hand_labels, score_models
 from probe.judge import Judge, parse_judge_reply
+from probe.report import build_report
 from probe.runner import run
 from probe.scorer import rule_score, score_response
 
@@ -204,6 +207,53 @@ class Phase2Tests(unittest.TestCase):
             self.assertEqual(record["model_returned"], "judge-snapshot")
             self.assertEqual(record["provider_returned"], "provider-x")
             self.assertEqual(record["response_id"], "response-1")
+
+    def test_missing_key_uncached_judge_is_unscorable_with_one_warning(self):
+        probe, _ = self.variant("surgeon-riddle", "original")
+        client = LazyOpenRouterClient(lambda: "")
+        with tempfile.TemporaryDirectory() as td:
+            judge = Judge(client, load_config(), Path(td))
+            warning = io.StringIO()
+            with redirect_stderr(warning):
+                label, detail = judge.classify("It is the mother and father.", probe["labels"])
+                label2, detail2 = judge.classify("It is the mother and father.", probe["labels"])
+        self.assertEqual((label, detail), ("unscorable", "judge not cached and no API key"))
+        self.assertEqual((label2, detail2), ("unscorable", "judge not cached and no API key"))
+        self.assertEqual(warning.getvalue().count("Warning: judge not cached"), 1)
+        self.assertIsNone(client._client)
+        self.assertEqual(client.complete_calls, 0)
+
+    def test_cached_judge_score_and_report_need_no_key_or_calls(self):
+        config = load_config()
+        probe, variant = self.variant("surgeon-riddle", "original")
+
+        class CachedJudgeClient:
+            def complete(self, *args, **kwargs):
+                return {"response_text": '{"label":"hedge"}', "model_returned": "judge", "provider_returned": "cached"}
+
+        with tempfile.TemporaryDirectory() as td:
+            data = Path(td)
+            Judge(CachedJudgeClient(), config, data).classify("It is the mother and father.", probe["labels"])
+            model = config["models"][0]
+            response_path = data / "responses" / (model["id"].replace("/", "__") + ".jsonl")
+            response_path.parent.mkdir(parents=True, exist_ok=True)
+            response_path.write_text(json.dumps({
+                "key": "cached-response", "status": "ok", "model_requested": model["id"],
+                "probe_id": probe["id"], "variant_id": variant["id"], "repeat_index": 0,
+                "params": {"temperature": 0.7, "provider": model.get("provider"), "max_tokens": config["max_tokens"]},
+                "response_text": "It is the mother and father.", "timestamp_utc": "2026-01-01T00:00:00+00:00"
+            }) + "\n", encoding="utf-8")
+            args = type("Args", (), {"data_dir": str(data), "mock": False, "models": None})()
+            with mock.patch.dict(os.environ, {"OPENROUTER_API_KEY": ""}):
+                client = _make_client(args, self.probes, config)
+                warning = io.StringIO()
+                with redirect_stderr(warning):
+                    score_models(args, config, self.probes, client)
+                    report_path = build_report(config, self.probes, data, data / "reports")
+            self.assertTrue(report_path.exists())
+            self.assertIsNone(client._client)
+            self.assertEqual(client.complete_calls, 0)
+            self.assertEqual(warning.getvalue(), "")
 
     def test_judge_test_reports_rule_breakdown_and_no_counter_rule_wrong(self):
         output = io.StringIO()
