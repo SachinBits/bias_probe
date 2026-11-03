@@ -5,6 +5,7 @@ import argparse
 import csv
 import json
 import os
+import random
 from collections import defaultdict
 from pathlib import Path
 
@@ -196,36 +197,132 @@ def run_judge_tests(args, config, probes):
     return result
 
 
-def sample_hand_labels(args):
-    data_dir = _data_dir(args)
-    rows = []
+def _response_line_index(data_dir, config):
+    index = {}
+    for model in config.get("models", []):
+        path = data_dir / "responses" / (model_slug(model["id"]) + ".jsonl")
+        if not path.exists():
+            continue
+        with path.open(encoding="utf-8") as handle:
+            for line_number, line in enumerate(handle, 1):
+                try:
+                    response = json.loads(line)
+                except (TypeError, ValueError):
+                    continue
+                identity = (response.get("key"), response.get("probe_id"), response.get("variant_id"),
+                            response.get("repeat_index"), (response.get("params") or {}).get("temperature"))
+                index[(model["id"],) + identity] = line_number
+    return index
+
+
+def _hand_candidates(data_dir, config, probes):
+    first_variants = {probe["id"]: probe.get("variants", [{}])[0].get("id") for probe in probes if probe.get("variants")}
+    line_index = _response_line_index(data_dir, config)
+    candidates_by_id = {}
+    model_by_slug = {model_slug(model["id"]): model["id"] for model in config.get("models", [])}
     for path in sorted((data_dir / "labels").glob("*.jsonl")):
-        rows.extend(JsonlStore(path).records())
-    groups = defaultdict(list)
-    for row in rows:
-        groups[row.get("probe_id")].append(row)
+        fallback_model = model_by_slug.get(path.stem)
+        with path.open(encoding="utf-8") as handle:
+            for label_row in handle:
+                try:
+                    row = json.loads(label_row)
+                except (TypeError, ValueError):
+                    continue
+                model = row.get("model") or fallback_model
+                if not model:
+                    continue
+                source = row.get("source") if row.get("source") in {"rule", "judge"} else "none"
+                identity = (model, row.get("key"), row.get("probe_id"), row.get("variant_id"),
+                            row.get("repeat_index"), row.get("temperature"))
+                candidate = {"key": row.get("key"), "model": model,
+                             "line": line_index.get(identity, ""),
+                             "probe_id": row.get("probe_id"), "variant_id": row.get("variant_id"),
+                             "repeat_index": row.get("repeat_index"), "temperature": row.get("temperature"),
+                             "response_text": row.get("response_text", ""), "label": row.get("label"),
+                             "label_source": source, "rule_label": row.get("rule_label"),
+                             "judge_label": row.get("judge_label"), "human_label": "",
+                             "is_long": len(row.get("response_text", "")) > 60,
+                             "is_changed": row.get("variant_id") != first_variants.get(row.get("probe_id"))}
+                dedup_key = (model, row.get("key"))
+                previous = candidates_by_id.get(dedup_key)
+                priority = {"none": 2, "judge": 2, "rule": 1}
+                if previous is None or priority[source] > priority[previous["label_source"]]:
+                    candidates_by_id[dedup_key] = candidate
+    return list(candidates_by_id.values())
+
+
+def _pick_candidates(candidates, n, seed):
+    rng = random.Random(seed)
+    shuffled = list(candidates)
+    rng.shuffle(shuffled)
     selected = []
-    while len(selected) < min(args.n, len(rows)):
-        added = False
-        for probe_id in sorted(groups):
-            if groups[probe_id]:
-                selected.append(groups[probe_id].pop(0))
-                added = True
-                if len(selected) == args.n:
+    selected_ids = set()
+
+    def add(row):
+        identity = (row["model"], row["key"])
+        if identity in selected_ids or len(selected) >= n:
+            return False
+        selected_ids.add(identity)
+        selected.append(row)
+        return True
+
+    # Preserve every available judge/unscorable candidate before filling quotas.
+    for row in shuffled:
+        if row["label_source"] in {"judge", "none"} or row.get("label") == "unscorable":
+            add(row)
+
+    def fill_category(field, target):
+        current = sum(bool(row.get(field)) for row in selected)
+        for row in shuffled:
+            if current >= target or len(selected) >= n:
+                break
+            if row.get(field) and (row["model"], row["key"]) not in selected_ids:
+                if add(row):
+                    current += 1
+
+    fill_category("is_long", 15)
+    fill_category("is_changed", 15)
+
+    groups = defaultdict(list)
+    for row in shuffled:
+        if (row["model"], row["key"]) not in selected_ids:
+            groups[(row["model"], row["probe_id"], row["variant_id"])].append(row)
+    group_keys = list(groups)
+    rng.shuffle(group_keys)
+    while len(selected) < min(n, len(candidates)) and group_keys:
+        progressed = False
+        for group_key in list(group_keys):
+            if groups[group_key]:
+                if add(groups[group_key].pop()):
+                    progressed = True
+                if len(selected) >= n:
                     break
-        if not added:
+            if not groups[group_key]:
+                group_keys.remove(group_key)
+        if not progressed:
             break
+    return selected
+
+
+def sample_hand_labels(args, config=None, probes=None):
+    config = config or load_config()
+    probes = probes or load_probe_files(config["probe_files"])
+    data_dir = _data_dir(args)
+    candidates = _hand_candidates(data_dir, config, probes)
+    selected = _pick_candidates(candidates, args.n, config.get("seed", 12345))
     path = data_dir / "hand_labels.csv"
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=["key", "probe_id", "variant_id", "repeat_index", "temperature", "response_text", "rule_label", "judge_label", "human_label"])
+    fields = ["key", "model", "line", "probe_id", "variant_id", "repeat_index", "temperature",
+              "response_text", "label", "label_source", "rule_label", "judge_label", "human_label"]
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=fields)
         writer.writeheader()
-        for row in selected:
-            writer.writerow({"key": row.get("key"), "probe_id": row.get("probe_id"), "variant_id": row.get("variant_id"),
-                             "repeat_index": row.get("repeat_index"), "temperature": row.get("temperature"),
-                             "response_text": row.get("response_text", ""), "rule_label": row.get("rule_label"),
-                             "judge_label": row.get("judge_label"), "human_label": ""})
+        writer.writerows({field: row.get(field, "") for field in fields} for row in selected)
     print("Wrote %d hand-label rows to %s" % (len(selected), path))
+    print("Categories: judge/unscorable=%d, long>60=%d, changed/non-first=%d" %
+          (sum(row["label_source"] in {"judge", "none"} or row.get("label") == "unscorable" for row in selected),
+           sum(row["is_long"] for row in selected), sum(row["is_changed"] for row in selected)))
+    return selected
 
 
 def check_scorer(args):
@@ -233,11 +330,26 @@ def check_scorer(args):
     if not path.exists():
         print("No hand-label file found: %s" % path)
         return
-    rows = list(csv.DictReader(path.open(encoding="utf-8")))
+    with path.open(encoding="utf-8", newline="") as handle:
+        rows = list(csv.DictReader(handle))
     labelled = [r for r in rows if r.get("human_label", "").strip()]
-    for name in ("rule_label", "judge_label"):
-        correct = sum(r.get(name) == r.get("human_label") for r in labelled)
-        print("%s accuracy: %d/%d (%.1f%%)" % (name, correct, len(labelled), 100.0 * correct / len(labelled) if labelled else 0.0))
+    for source, field in (("rule", "rule_label"), ("judge", "judge_label")):
+        source_rows = [row for row in labelled if (row.get("label_source") or ("judge" if row.get("judge_label") else "rule")) == source]
+        correct = sum(row.get(field) == row.get("human_label") for row in source_rows)
+        disagreements = [row for row in source_rows if row.get(field) != row.get("human_label")]
+        print("%s vs human: %d/%d (%.1f%%); wrong=%d" %
+              (source, correct, len(source_rows), 100.0 * correct / len(source_rows) if source_rows else 0.0,
+               len(disagreements)))
+        confusion = defaultdict(int)
+        for row in disagreements:
+            confusion[(row.get(field) or "missing", row.get("human_label"))] += 1
+        print("%s confusion: %s" % (source, dict(confusion)))
+        for row in disagreements:
+            model = row.get("model", "unknown")
+            line = row.get("line", "?")
+            file_name = "data/responses/%s.jsonl" % model_slug(model) if model != "unknown" else "data/responses/?"
+            print("DISAGREEMENT %s: %s:%s; response=%s; scorer=%s; human=%s" %
+                  (source, file_name, line, row.get("response_text", ""), row.get(field, ""), row.get("human_label", "")))
     print("labelled rows: %d/%d" % (len(labelled), len(rows)))
 
 

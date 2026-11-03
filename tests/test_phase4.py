@@ -1,3 +1,4 @@
+import csv
 import json
 import os
 import tempfile
@@ -5,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from probe.bank import load_probe_files
-from probe.cli import add_probe, run_judge_tests
+from probe.cli import add_probe, run_judge_tests, sample_hand_labels
 from probe.config import load_config
 from probe.judge import Judge
 from probe.scorer import JUDGE_PROMPT_VERSION, rule_score
@@ -68,6 +69,58 @@ class Phase4Tests(unittest.TestCase):
                 os.chdir(old)
             bank = json.loads((root / "probes" / "custom.json").read_text(encoding="utf-8"))
         self.assertEqual(bank["probes"][0]["id"], "phase4-test-probe")
+
+    def test_hand_label_sample_mix_and_model_key_dedup(self):
+        config = load_config()
+        models = [model["id"] for model in config["models"]]
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            for model_index, model in enumerate(models):
+                slug = model.replace("/", "__").replace(":", "__")
+                response_path = root / "responses" / (slug + ".jsonl")
+                label_path = root / "labels" / (slug + ".jsonl")
+                response_path.parent.mkdir(parents=True, exist_ok=True)
+                label_path.parent.mkdir(parents=True, exist_ok=True)
+                response_lines, label_lines = [], []
+                for i in range(35):
+                    probe = self.probes[i % len(self.probes)]
+                    variant = probe["variants"][i % len(probe["variants"])]
+                    key = "%s-key-%d" % (model_index, i)
+                    text = "x" * 70 if i < 20 else "short answer"
+                    source = "judge" if i < 2 else ("none" if i == 2 else "rule")
+                    response = {"key": key, "model_requested": model, "probe_id": probe["id"],
+                                "variant_id": variant["id"], "repeat_index": i, "params": {"temperature": 0.7},
+                                "response_text": text, "status": "ok"}
+                    response_lines.append(json.dumps(response))
+                    label_lines.append(json.dumps({"key": key, "model": model, "probe_id": probe["id"],
+                                                   "variant_id": variant["id"], "repeat_index": i,
+                                                   "temperature": 0.7, "response_text": text, "label": "x",
+                                                   "source": source, "rule_label": "x" if source == "rule" else None,
+                                                   "judge_label": "x" if source == "judge" else None}))
+                # Same model and key as an existing row, but a different probe: must be deduplicated.
+                duplicate = json.loads(label_lines[0])
+                duplicate["probe_id"] = self.probes[-1]["id"]
+                label_lines.append(json.dumps(duplicate))
+                response_path.write_text("\n".join(response_lines) + "\n", encoding="utf-8")
+                label_path.write_text("\n".join(label_lines) + "\n", encoding="utf-8")
+            args = type("Args", (), {"data_dir": td, "mock": False, "n": 60})()
+            sample_hand_labels(args, config, self.probes)
+            with (root / "hand_labels.csv").open(encoding="utf-8", newline="") as handle:
+                rows = list(csv.DictReader(handle))
+            sample_hand_labels(args, config, self.probes)
+            with (root / "hand_labels.csv").open(encoding="utf-8", newline="") as handle:
+                repeat_rows = list(csv.DictReader(handle))
+        self.assertEqual(len(rows), 60)
+        self.assertEqual(rows, repeat_rows)
+        self.assertTrue({"model", "line", "label_source", "human_label"}.issubset(rows[0]))
+        self.assertTrue(all(row["line"] for row in rows))
+        self.assertTrue(all(row["human_label"] == "" for row in rows))
+        self.assertEqual(len({(row["model"], row["key"]) for row in rows}), 60)
+        self.assertEqual({row["model"] for row in rows}, set(models))
+        self.assertGreaterEqual(sum(row["label_source"] in {"judge", "none"} for row in rows), 3)
+        self.assertGreaterEqual(sum(len(row["response_text"]) > 60 for row in rows), 15)
+        first = {probe["id"]: probe["variants"][0]["id"] for probe in self.probes}
+        self.assertGreaterEqual(sum(row["variant_id"] != first.get(row["probe_id"]) for row in rows), 15)
 
 
 if __name__ == "__main__":
