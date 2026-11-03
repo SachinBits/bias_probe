@@ -9,7 +9,7 @@ from probe.bank import load_probe_files
 from probe.client import MockClient
 from probe.client import ClientError
 from probe.config import load_config
-from probe.cli import sample_hand_labels, score_models
+from probe.cli import run_judge_tests, sample_hand_labels, score_models
 from probe.judge import Judge, parse_judge_reply
 from probe.runner import run
 from probe.scorer import rule_score, score_response
@@ -42,7 +42,20 @@ class Phase2Tests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             scored = score_response("Not the mother, it's the father.", probe, variant, self.judge(td))
         self.assertEqual(scored["label"], "father")
+        self.assertIn(scored["source"], {"rule", "judge"})
+        with tempfile.TemporaryDirectory() as td:
+            scored = score_response("His dad, not his mother.", probe, variant, self.judge(td))
+        self.assertNotEqual(scored["label"], "mother")
+        self.assertEqual(scored["label"], "father")
+
+    def test_contradictory_strong_regex_hit_goes_to_judge(self):
+        probe, variant = self.variant("surgeon-riddle", "original")
+        response = "The surgeon is the boy's father, and the answer is the mother."
+        self.assertIsNone(rule_score(response, probe, variant)["label"])
+        with tempfile.TemporaryDirectory() as td:
+            scored = score_response(response, probe, variant, self.judge(td))
         self.assertEqual(scored["source"], "judge")
+        self.assertEqual(scored["label"], "hedge")
 
     def test_both_labels_use_judge_or_unscorable(self):
         probe, variant = self.variant("surgeon-riddle", "original")
@@ -174,8 +187,36 @@ class Phase2Tests(unittest.TestCase):
             self.assertIn("cached", detail)
             files = list((Path(td) / "judge").glob("*.jsonl"))
             record = json.loads(files[0].read_text(encoding="utf-8").splitlines()[0])
-            self.assertEqual(record["judge_prompt_version"], "1")
+            self.assertEqual(record["judge_prompt_version"], "2")
             self.assertNotIn("surgeon", record["prompt"].lower())
+
+    def test_plain_allowed_label_reply_is_accepted(self):
+        self.assertEqual(parse_judge_reply('"Father."', ["mother", "father"]), "father")
+
+    def test_judge_record_keeps_returned_metadata(self):
+        class MetadataClient:
+            def complete(self, *args, **kwargs):
+                return {"response_text": '{"label":"father"}', "model_returned": "judge-snapshot", "provider_returned": "provider-x", "response_id": "response-1"}
+        with tempfile.TemporaryDirectory() as td:
+            judge = Judge(MetadataClient(), load_config(), Path(td))
+            judge.classify("father", ["mother", "father"])
+            record = json.loads(next((Path(td) / "judge").glob("*.jsonl")).read_text().splitlines()[0])
+            self.assertEqual(record["model_returned"], "judge-snapshot")
+            self.assertEqual(record["provider_returned"], "provider-x")
+            self.assertEqual(record["response_id"], "response-1")
+
+    def test_judge_test_reports_rule_breakdown_and_no_counter_rule_wrong(self):
+        output = io.StringIO()
+        args = type("Args", (), {"data_dir": "/tmp/phase26-judge-test", "mock": True})()
+        with redirect_stdout(output):
+            run_judge_tests(args, load_config(), self.probes)
+        text = output.getvalue()
+        self.assertIn("rule overall: correct=", text)
+        self.assertIn("wrong=", text)
+        self.assertIn("abstained=", text)
+        self.assertIn("counter-stereotype rule: correct=", text)
+        self.assertIn("counter-stereotype rule: correct=", text)
+        self.assertIn("wrong=0", text)
 
     def test_score_command_writes_required_label_record_fields(self):
         with tempfile.TemporaryDirectory() as td:

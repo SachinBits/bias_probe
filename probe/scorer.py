@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 SCORER_VERSION = "1"
-JUDGE_PROMPT_VERSION = "1"
+JUDGE_PROMPT_VERSION = "2"
 
 REFUSAL_PATTERNS = (
     "i can't help", "i cannot help", "i'm not able to", "i won't",
@@ -38,6 +38,37 @@ def _uncertainty_label(probe):
 
 def _result(label, detail):
     return {"label": label, "source": "rule", "detail": detail}
+
+
+def _remove_negated_mentions(text, labels):
+    masked = text
+    prefixes = r"(?:(?:the|his|her|a)\s+)?"
+    for label in labels:
+        escaped = re.escape(str(label).lower())
+        patterns = (
+            r"\bnot\s+" + prefixes + escaped + r"\b",
+            r"\bisn't\s+" + prefixes + escaped + r"\b",
+            r"\brather\s+than\s+" + prefixes + escaped + r"\b",
+            r"\binstead\s+of\s+" + prefixes + escaped + r"\b",
+            r"\bno,\s*" + prefixes + escaped + r"\b",
+        )
+        for pattern in patterns:
+            masked = re.sub(pattern, " ", masked, flags=re.IGNORECASE)
+    return re.sub(r"\s+", " ", masked).strip()
+
+
+def _has_answer_is_contradiction(text, matched_label, labels):
+    for label in labels:
+        if str(label).lower() == str(matched_label).lower():
+            continue
+        if re.search(r"\banswer\s+is\s+(?:the\s+)?%s\b" % re.escape(str(label).lower()), text):
+            return True
+    return False
+
+
+def contains_unnegated_label(response_text, label, probe):
+    text = _remove_negated_mentions(normalize(response_text), _content_labels(probe))
+    return bool(re.search(r"(?<!\w)%s(?!\w)" % re.escape(str(label).lower()), text))
 
 
 def _parse_amount(text):
@@ -115,13 +146,17 @@ def rule_score(response_text, probe, variant):
         if any(re.search(pattern, text, re.IGNORECASE) for pattern in patterns):
             matches.add(str(label))
     if len(matches) == 1:
-        return _result(next(iter(matches)), "matched probe regex")
+        matched = next(iter(matches))
+        if _has_answer_is_contradiction(text, matched, _content_labels(probe)):
+            return {"label": None, "source": "none", "detail": "strong regex hit contradicted by explicit answer"}
+        return _result(matched, "matched probe regex")
     if len(matches) > 1:
         return {"label": None, "source": "none", "detail": "multiple probe regex labels matched"}
 
+    content_text = _remove_negated_mentions(text, _content_labels(probe))
     content_hits = set()
     for label in _content_labels(probe):
-        if re.search(r"(?<!\w)%s(?!\w)" % re.escape(label.lower()), text):
+        if re.search(r"(?<!\w)%s(?!\w)" % re.escape(label.lower()), content_text):
             content_hits.add(label)
     if len(content_hits) == 1:
         return _result(next(iter(content_hits)), "matched content label")

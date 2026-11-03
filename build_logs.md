@@ -143,3 +143,23 @@ This file is append-only. Each completed implementation phase and review update 
 - `python3 -m probe judge-test --mock` → rule accuracy `22/36 (61.1%)`; judge accuracy `33/36 (91.7%)`; counter-stereotype judge accuracy `10/11 (90.9%)`.
 - `python3 -m probe sample-hand-labels --n 60 --mock` → hand-label identity includes key, probe, variant, repeat, and temperature fields.
 - No real API calls were made and `data/responses/` was not modified.
+
+## Phase 2.6 Scorer Fixes
+
+### Scoring and judge changes
+
+- Negated content-label mentions are removed before fallback matching, preventing phrases such as `His dad, not his mother` from being labelled `mother`.
+- Strong regex hits are sent to the judge when the same response explicitly says `answer is` another content label.
+- Bumped `JUDGE_PROMPT_VERSION` from `1` to `2`, invalidating old judge-result cache entries without changing response-call caches.
+- Judge records now preserve `model_returned`, `provider_returned`, and `response_id`.
+- Plain replies that are exactly an allowed label after punctuation/quote stripping are accepted even when they contain no JSON object.
+- Social uncertainty responses can record `stereotype_in_reasoning: true` when an unnegated stereotype label appears in the reasoning.
+- `judge-test` now reports raw correct, wrong, and abstained counts for rules and the judge, including counter-stereotype subsets.
+
+### Verification
+
+- `python3 -m unittest` → 30 tests passed.
+- `python3 -m probe score --mock` → completed; current GPT records scored and 780 superseded Llama records reported.
+- `python3 -m probe judge-test --mock` → rule overall: correct `26`, wrong `0`, abstained `10`; counter-stereotype rule: correct `7`, wrong `0`, abstained `4`.
+- Judge overall: correct `32`, wrong `1`, abstained `3`; counter-stereotype judge: correct `10`, wrong `1`, abstained `0`.
+- No real API calls were made and `data/responses/` was not modified.

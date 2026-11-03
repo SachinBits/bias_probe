@@ -13,7 +13,7 @@ from .client import MockClient, OpenRouterClient
 from .config import load_config, model_slug
 from .judge import Judge
 from .runner import run
-from .scorer import JUDGE_PROMPT_VERSION, SCORER_VERSION, rule_score, score_response
+from .scorer import JUDGE_PROMPT_VERSION, SCORER_VERSION, contains_unnegated_label, rule_score, score_response
 from .store import JsonlStore
 
 
@@ -105,6 +105,13 @@ def score_models(args, config, probes, client):
                           "detail": scored["detail"], "scorer_version": SCORER_VERSION,
                           "judge_prompt_version": JUDGE_PROMPT_VERSION, "response_text": response.get("response_text", ""),
                           "rule_label": rule.get("label"), "judge_label": scored["label"] if scored["source"] == "judge" else None}
+                uncertainty = next((str(x) for x in probe.get("labels", []) if str(x).lower() in {"unknown", "unclear"}), None)
+                stereotype = probe.get("stereotype")
+                if isinstance(stereotype, dict):
+                    stereotype = stereotype.get(response.get("variant_id"))
+                if (probe.get("family") == "social" and uncertainty and stereotype and
+                        scored.get("label") == uncertainty and contains_unnegated_label(response.get("response_text", ""), stereotype, probe)):
+                    record["stereotype_in_reasoning"] = True
                 label_store.append(record)
                 counts[scored["source"] + ":" + scored["label"]] += 1
         results.append((model["id"], dict(counts)))
@@ -119,7 +126,9 @@ def run_judge_tests(args, config, probes):
     client = _make_client(args, probes, config)
     judge = Judge(client, config, _data_dir(args))
     by_id, variants = _probe_maps(probes)
-    rule_correct = judge_correct = counter_rule = counter_judge = counter_total = 0
+    rule_correct = rule_wrong = rule_abstained = 0
+    judge_correct = judge_wrong = judge_abstained = 0
+    counter_rule = counter_rule_wrong = counter_rule_abstained = counter_judge = counter_judge_wrong = counter_judge_abstained = counter_total = 0
     for item in items:
         probe = by_id[item["probe_id"]]
         variant = variants.get((item["probe_id"], item.get("variant_id"))) or probe["variants"][0]
@@ -129,16 +138,36 @@ def run_judge_tests(args, config, probes):
         if choice_mode and judged not in {"hedge", "refused", "unscorable"}:
             mapping = variant.get("map", {})
             judged = next((str(value) for key, value in mapping.items() if str(key) == str(judged)), "other")
-        rule_correct += rule.get("label") == item["gold"]
-        judge_correct += judged == item["gold"]
+        if rule.get("label") is None:
+            rule_abstained += 1
+        elif rule.get("label") == item["gold"]:
+            rule_correct += 1
+        else:
+            rule_wrong += 1
+        if judged == "unscorable":
+            judge_abstained += 1
+        elif judged == item["gold"]:
+            judge_correct += 1
+        else:
+            judge_wrong += 1
         if item.get("counter_stereotype"):
             counter_total += 1
-            counter_rule += rule.get("label") == item["gold"]
-            counter_judge += judged == item["gold"]
-    print("rule accuracy: %d/%d (%.1f%%)" % (rule_correct, len(items), 100.0 * rule_correct / len(items)))
-    print("judge accuracy: %d/%d (%.1f%%)" % (judge_correct, len(items), 100.0 * judge_correct / len(items)))
-    print("counter-stereotype rule accuracy: %d/%d (%.1f%%)" % (counter_rule, counter_total, 100.0 * counter_rule / counter_total))
-    print("counter-stereotype judge accuracy: %d/%d (%.1f%%)" % (counter_judge, counter_total, 100.0 * counter_judge / counter_total))
+            if rule.get("label") is None:
+                counter_rule_abstained += 1
+            elif rule.get("label") == item["gold"]:
+                counter_rule += 1
+            else:
+                counter_rule_wrong += 1
+            if judged == "unscorable":
+                counter_judge_abstained += 1
+            elif judged == item["gold"]:
+                counter_judge += 1
+            else:
+                counter_judge_wrong += 1
+    print("rule overall: correct=%d wrong=%d abstained=%d total=%d" % (rule_correct, rule_wrong, rule_abstained, len(items)))
+    print("judge overall: correct=%d wrong=%d abstained=%d total=%d" % (judge_correct, judge_wrong, judge_abstained, len(items)))
+    print("counter-stereotype rule: correct=%d wrong=%d abstained=%d total=%d" % (counter_rule, counter_rule_wrong, counter_rule_abstained, counter_total))
+    print("counter-stereotype judge: correct=%d wrong=%d abstained=%d total=%d" % (counter_judge, counter_judge_wrong, counter_judge_abstained, counter_total))
 
 
 def sample_hand_labels(args):

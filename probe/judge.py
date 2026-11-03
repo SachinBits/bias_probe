@@ -26,6 +26,10 @@ def parse_judge_reply(reply_text, allowed_labels):
     text = re.sub(r"```(?:json)?", "", text, flags=re.IGNORECASE).replace("```", "").strip()
     match = re.search(r"\{.*?\}", text, flags=re.DOTALL)
     if not match:
+        plain = text.strip().strip("`\"'.,;:!?()[]{} ")
+        for allowed in allowed_labels:
+            if plain.lower() == str(allowed).lower():
+                return str(allowed)
         return "unscorable"
     try:
         payload = json.loads(match.group(0))
@@ -85,13 +89,15 @@ class Judge:
             record = {"key": key, "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                       "judge_prompt_version": JUDGE_PROMPT_VERSION, "model": self.judge.get("id"),
                       "response_text": response_text, "prompt": prompt, "label": label, "status": "ok", "error": None,
-                      "attempts": attempts}
+                      "attempts": attempts, "model_returned": result.get("model_returned"),
+                      "provider_returned": result.get("provider_returned"), "response_id": result.get("response_id")}
             self.store.append(record)
             return label, "judge option token" if tokens else "judge JSON label"
         except Exception as exc:
             record = {"key": key, "timestamp_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                       "judge_prompt_version": JUDGE_PROMPT_VERSION, "model": self.judge.get("id"),
                       "response_text": response_text, "prompt": prompt, "label": "unscorable", "status": "error", "error": str(exc),
-                      "attempts": getattr(exc, "attempts", 1)}
+                      "attempts": getattr(exc, "attempts", 1), "model_returned": None,
+                      "provider_returned": None, "response_id": None}
             self.store.append(record)
             return "unscorable", "judge error: %s" % exc
