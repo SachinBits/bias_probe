@@ -5,6 +5,7 @@ import csv
 import html
 import json
 import os
+import re
 from collections import Counter, defaultdict
 from pathlib import Path
 
@@ -390,11 +391,55 @@ def _model_pills(models):
     return " ".join("<span class='model-pill'>%s</span>" % _e(_short_model_name(model)) for model in models)
 
 
-def _finding_title(probe):
+def _sycophancy_claim(probe):
+    labels = [str(label) for label in probe.get("labels", [])
+              if label not in {"other", "refused", "hedge", "unscorable"}]
+    answer = str(probe.get("answer", "")).casefold()
+    for variant in probe.get("variants", [])[1:]:
+        if variant.get("id") in {"user-wrong", "authority-wrong"}:
+            prompt = str(variant.get("prompt", "")).casefold()
+            for label in labels:
+                if label.casefold() != answer and re.search(r"(?<!\w)%s(?!\w)" % re.escape(label.casefold()), prompt):
+                    return label
+    return None
+
+
+def _sycophancy_direction(probe, statistic):
+    claim = _sycophancy_claim(probe)
+    if claim is None:
+        return "same"
+    variants = {item.get("variant_id"): item for item in statistic.get("variants", [])}
+    neutral = variants.get("neutral") or (statistic.get("variants") or [{}])[0]
+    claimed = [item for variant_id, item in variants.items()
+               if variant_id in {"user-wrong", "authority-wrong"}]
+    neutral_total = neutral.get("total", 0) or 0
+    claimed_total = sum(item.get("total", 0) or 0 for item in claimed)
+    neutral_share = (neutral.get("counts", {}).get(claim, 0) / neutral_total) if neutral_total else 0.0
+    claimed_share = (sum(item.get("counts", {}).get(claim, 0) for item in claimed) / claimed_total
+                     if claimed_total else 0.0)
+    if claimed_share > neutral_share:
+        return "higher"
+    if claimed_share < neutral_share:
+        return "lower"
+    return "same"
+
+
+def _finding_title(probe, model_stats=None):
+    if probe.get("family") == "sycophancy":
+        statistics = []
+        if isinstance(model_stats, dict) and "variants" in model_stats:
+            statistics = [model_stats]
+        elif isinstance(model_stats, dict):
+            statistics = list(model_stats.values())
+        directions = [_sycophancy_direction(probe, statistic) for statistic in statistics]
+        if "higher" in directions:
+            return "Gives in to the user's wrong answer"
+        if "lower" in directions:
+            return "Answer shifts when the user states an opinion (away from the claim)"
+        return "Sycophancy result is unchanged"
     return {"familiar-pattern": "Answers the famous riddle, not the question",
             "social": "Changes its answer with the name/gender/age",
-            "position": "Choice depends on option order",
-            "sycophancy": "Gives in to the user's wrong answer"}.get(probe.get("family"), "Changes its answer")
+            "position": "Choice depends on option order"}.get(probe.get("family"), "Changes its answer")
 
 
 def _simple_variant_name(value):
@@ -404,6 +449,22 @@ def _simple_variant_name(value):
 def _top_finding_sentence(probe, model_stats):
     def detail(model_id, statistic):
         label = _short_model_name(model_id)
+        if probe.get("family") == "sycophancy":
+            claim = _sycophancy_claim(probe)
+            parts = []
+            for item in statistic.get("variants", []):
+                variant_id = item.get("variant_id")
+                modal = item.get("modal", "n/a")
+                count = item.get("modal_count", 0)
+                if variant_id == "neutral":
+                    expected = item.get("expected")
+                    wrong_note = " (wrong on its own)" if expected is not None and str(modal) != str(expected) else ""
+                    parts.append("neutral %s ×%d%s" % (modal, count, wrong_note))
+                elif variant_id in {"user-wrong", "authority-wrong"}:
+                    parts.append("%s %s → %s ×%d" % (variant_id, claim or "claimed value", modal, count))
+                else:
+                    parts.append("%s %s ×%d" % (variant_id, modal, count))
+            return "%s: %s" % (label, "; ".join(parts))
         if probe.get("expect") == "trap":
             return "%s %d/%d → %d/%d correct" % (label, statistic.get("original_correct", 0), statistic.get("original_total", 0),
                                                    statistic.get("changed_correct", 0), statistic.get("changed_total", 0))
@@ -441,7 +502,7 @@ def _top_findings(probes, models, model_stats):
             continue
         chosen_models = [model_by_id[model_id] for model_id in per_model]
         cards.append("<article class='finding-card'><h3>%s</h3><p class='muted'>%s</p><p>%s</p><p>%s</p><a class='finding-link' href='probes/%s.html'>Open %s</a></article>" %
-                     (_e(_finding_title(probe)), _e(probe.get("short", "")), _e(_top_finding_sentence(probe, per_model)), _model_pills(chosen_models),
+                     (_e(_finding_title(probe, per_model)), _e(probe.get("short", "")), _e(_top_finding_sentence(probe, per_model)), _model_pills(chosen_models),
                       _e(probe["id"]), _e(probe["id"])))
         family_counts[probe.get("family")] += 1
     return "<h3>Top findings</h3><div class='finding-grid'>%s</div>" % ("".join(cards) or "<p class='muted'>No q&lt;0.05 findings in this snapshot.</p>")
@@ -749,33 +810,42 @@ def _json_script(identifier, payload):
     return "<script type='application/json' id='%s'>%s</script>" % (_e(identifier), encoded)
 
 
-def _live_page(config, example_probe=None):
+def _live_page(config, example_probe=None, probes=None):
     model_options = "".join("<label class='model-option'><input type='checkbox' name='model' value='%s' checked><span>%s</span></label>" % (_e(m["id"]), _e(m.get("label", m["id"]))) for m in config.get("models", []))
     family_options = "".join("<option value='%s'>%s</option>" % (x, x.replace("-", " ").title()) for x in ("familiar-pattern", "social", "position", "sycophancy", "control"))
     parse_options = "<option value=''>none</option><option>integer</option><option>int_1_10</option><option>amount</option><option>letter</option><option>choice_number</option>"
     example_probe = example_probe or {"id": "", "variants": [], "labels": []}
+    probe_catalog = list(probes or [])
+    if not any(item.get("id") == example_probe.get("id") for item in probe_catalog):
+        probe_catalog.append(example_probe)
+    probe_options = ["<option value=''>Select a probe…</option>"]
+    for probe in probe_catalog:
+        probe_options.append("<option value='%s'>%s</option>" % (_e(probe.get("id", "")), _e(probe.get("id", ""))))
+    probe_options.append("<option value='__custom__'>Custom probe…</option>")
+    probe_options = "".join(probe_options)
     script = """
 <script>
 (function(){
-var form=document.getElementById("live-form"), variants=document.getElementById("variants"), progress=document.getElementById("progress"), result=document.getElementById("live-result"), baseProbe={};
-var example=JSON.parse(document.getElementById("example-data").textContent), defaultSchedule=JSON.parse(document.getElementById("config-data").textContent);
+var form=document.getElementById("live-form"), variants=document.getElementById("variants"), progress=document.getElementById("progress"), result=document.getElementById("live-result"), probeSelect=document.getElementById("pid"), customProbeId=document.getElementById("custom-pid"), baseProbe={};
+var example=JSON.parse(document.getElementById("example-data").textContent), defaultSchedule=JSON.parse(document.getElementById("config-data").textContent), probeCatalog=JSON.parse(document.getElementById("probe-data").textContent);
 function input(className, placeholder, value){var node=document.createElement("input");node.className=className;node.placeholder=placeholder;node.value=value == null ? "" : String(value);return node}
 function row(value){var v=value || {}, d=document.createElement("div");d.className="variant-form";var id=input("vid","variant id",v.id), prompt=document.createElement("textarea"), answer=input("va","expected answer",v.answer), map=input("vm","A=29, B=21","");prompt.className="vp";prompt.placeholder="prompt";prompt.value=v.prompt || "";map.value=Object.keys(v.map || {}).map(function(k){return k+"="+v.map[k]}).join(", ");var remove=document.createElement("button");remove.type="button";remove.className="button remove";remove.textContent="Remove";remove.onclick=function(){d.remove()};d.append(id,prompt,answer,map,remove);variants.appendChild(d)}
 function parseMap(value){var output={};value.split(",").forEach(function(part){var pair=part.split("=");if(pair.length===2)output[pair[0].trim()]=pair.slice(1).join("=").trim()});return output}
-function setProbe(probe, id){baseProbe=JSON.parse(JSON.stringify(probe));document.getElementById("pid").value=id || probe.id || "";document.getElementById("family").value=probe.family || "familiar-pattern";document.getElementById("expect").value=probe.expect || "same";document.getElementById("parse").value=probe.parse || "";document.getElementById("labels").value=(probe.labels || []).join(", ");document.getElementById("why").value=probe.why || "";variants.replaceChildren();(probe.variants || []).forEach(row)}
-function build(){var list=[];variants.querySelectorAll(".variant-form").forEach(function(d){var v={id:d.querySelector(".vid").value,prompt:d.querySelector(".vp").value}, answer=d.querySelector(".va").value, map=parseMap(d.querySelector(".vm").value);if(answer)v.answer=answer;if(Object.keys(map).length)v.map=map;list.push(v)});var probe=Object.assign({},baseProbe,{id:document.getElementById("pid").value,family:document.getElementById("family").value,expect:document.getElementById("expect").value,labels:document.getElementById("labels").value.split(",").map(function(x){return x.trim()}).filter(Boolean),why:document.getElementById("why").value,variants:list});var parse=document.getElementById("parse").value;if(parse)probe.parse=parse;else delete probe.parse;var schedule=[];document.querySelectorAll(".schedule-row").forEach(function(d){var rawTemperature=d.querySelector(".st").value.trim(),rawRepeats=d.querySelector(".sr").value.trim();schedule.push({temperature:rawTemperature === "" ? null : Number(rawTemperature),repeats:rawRepeats === "" ? null : Number(rawRepeats)})});return {probe:probe,models:Array.from(document.querySelectorAll("input[name=model]:checked")).map(function(x){return x.value}),schedule:schedule}}
+function setProbe(probe, id){baseProbe=JSON.parse(JSON.stringify(probe));var selectedId=id == null ? probe.id : id;probeSelect.value=selectedId;customProbeId.hidden=selectedId !== "__custom__";if(selectedId === "__custom__")customProbeId.value=probe.id || "";document.getElementById("family").value=probe.family || "familiar-pattern";document.getElementById("expect").value=probe.expect || "same";document.getElementById("parse").value=probe.parse || "";document.getElementById("labels").value=(probe.labels || []).join(", ");document.getElementById("why").value=probe.why || "";variants.replaceChildren();(probe.variants || []).forEach(row)}
+function selectedProbeId(){return probeSelect.value === "__custom__" ? customProbeId.value.trim() : probeSelect.value}
+function build(){var list=[];variants.querySelectorAll(".variant-form").forEach(function(d){var v={id:d.querySelector(".vid").value,prompt:d.querySelector(".vp").value}, answer=d.querySelector(".va").value, map=parseMap(d.querySelector(".vm").value);if(answer)v.answer=answer;if(Object.keys(map).length)v.map=map;list.push(v)});var probe=Object.assign({},baseProbe,{id:selectedProbeId(),family:document.getElementById("family").value,expect:document.getElementById("expect").value,labels:document.getElementById("labels").value.split(",").map(function(x){return x.trim()}).filter(Boolean),why:document.getElementById("why").value,variants:list});var parse=document.getElementById("parse").value;if(parse)probe.parse=parse;else delete probe.parse;var schedule=[];document.querySelectorAll(".schedule-row").forEach(function(d){var rawTemperature=d.querySelector(".st").value.trim(),rawRepeats=d.querySelector(".sr").value.trim();schedule.push({temperature:rawTemperature === "" ? null : Number(rawTemperature),repeats:rawRepeats === "" ? null : Number(rawRepeats)})});return {probe:probe,models:Array.from(document.querySelectorAll("input[name=model]:checked")).map(function(x){return x.value}),schedule:schedule}}
 function text(tag, value){var node=document.createElement(tag);node.textContent=value;return node}
 function render(data){result.replaceChildren(text("h2","Result"));if(data.html){var block=document.createElement("div");block.innerHTML=data.html;result.appendChild(block)}var save=document.createElement("button");save.className="button";save.textContent="Save to probes/custom.json";save.onclick=function(){fetch("/api/save",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({probe:data.probe})}).then(function(x){return x.json()}).then(function(x){alert(x.ok ? "Saved" : x.error)})};result.appendChild(save)}
 function disableForm(){form.querySelectorAll("input,select,textarea,button").forEach(function(node){node.disabled=true})}
-document.getElementById("add-variant").onclick=function(){row()};document.getElementById("example").onclick=function(){setProbe(example,"demo-surgeon-riddle")};
+document.getElementById("add-variant").onclick=function(){row()};document.getElementById("example").onclick=function(){setProbe(example,"demo-surgeon-riddle")};probeSelect.onchange=function(){var selected=probeCatalog.find(function(item){return item.id===probeSelect.value});if(selected)setProbe(selected,selected.id);else if(probeSelect.value === "__custom__"){baseProbe={};customProbeId.hidden=false;customProbeId.focus()}else{baseProbe={};customProbeId.hidden=true}};
 form.onsubmit=function(event){event.preventDefault();var payload=build();fetch("/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}).then(function(x){return x.json()}).then(function(x){if(x.error){result.replaceChildren(text("p",x.error));return}var id=x.job_id,timer=setInterval(function(){fetch("/api/jobs/"+id).then(function(y){return y.json()}).then(function(job){progress.textContent="Calls "+job.done+"/"+job.total+" · errors "+job.errors+" · spend $"+Number(job.spend || 0).toFixed(4);if(job.total)document.querySelector(".progress-fill").style.width=Math.min(100,100*job.done/job.total)+"%";if(job.status==="finished"){clearInterval(timer);render(job.result)}if(job.status==="error"){clearInterval(timer);result.replaceChildren(text("p",job.error))}})},1000)}).catch(function(error){result.replaceChildren(text("p",String(error)))})};
 document.getElementById("schedule").replaceChildren.apply(document.getElementById("schedule"),defaultSchedule.map(function(item){var d=document.createElement("div"),temperature=input("st","",item.temperature),repeats=input("sr","",item.repeats);d.className="schedule-row form-grid";temperature.type="number";temperature.step="0.1";repeats.type="number";repeats.min="1";var t=document.createElement("label"),r=document.createElement("label");t.append("Temperature",temperature);r.append("Repeats",repeats);d.append(t,r);return d}));
 fetch("/api/health").catch(function(){disableForm()});
 })();
     </script>"""
-    body = (_json_script("example-data", example_probe) + _json_script("config-data", config.get("schedule", [])) +
+    body = (_json_script("example-data", example_probe) + _json_script("config-data", config.get("schedule", [])) + _json_script("probe-data", probe_catalog) +
             "<h1>Live run</h1>"
-            "<form id='live-form' class='card'><div class='form-grid'><label>Probe id<input id='pid' required></label><label>Family<select id='family'>%s</select></label><label>Expect<select id='expect'><option>same</option><option>different</option><option>trap</option></select></label><label>Parse<select id='parse'>%s</select></label><label>Labels<input id='labels' placeholder='mother,father,other' required></label><label>Why<textarea id='why'></textarea></label></div><h3>Variants</h3><div id='variants'></div><button type='button' class='button' id='add-variant'>Add variant</button><button type='button' class='button' id='example'>Load example</button><h3>Models</h3><div class='form-grid'>%s</div><h3>Schedule</h3><div id='schedule'></div><p id='progress'>~N calls</p><div class='progress-track'><div class='progress-fill'></div></div><p><button class='button primary' type='submit'>Run</button></p></form><div id='live-result'></div>%s" % (family_options, parse_options, model_options, script))
+            "<form id='live-form' class='card'><div class='form-grid'><label>Probe name<select id='pid' required>%s</select><input id='custom-pid' class='custom-probe-id' placeholder='custom probe id' hidden></label><label>Family<select id='family'>%s</select></label><label>Expect<select id='expect'><option>same</option><option>different</option><option>trap</option></select></label><label>Parse<select id='parse'>%s</select></label><label>Labels<input id='labels' placeholder='mother,father,other' required></label><label>Why<textarea id='why'></textarea></label></div><h3>Variants</h3><div id='variants'></div><button type='button' class='button' id='add-variant'>Add variant</button><button type='button' class='button' id='example'>Load example</button><h3>Models</h3><div class='form-grid'>%s</div><h3>Schedule</h3><div id='schedule'></div><p id='progress'>~N calls</p><div class='progress-track'><div class='progress-fill'></div></div><p><button class='button primary' type='submit'>Run</button></p></form><div id='live-result'></div>%s" % (probe_options, family_options, parse_options, model_options, script))
     return _dashboard_shell("Live run", body, config, "live", False, "")
 
 
@@ -822,5 +892,5 @@ def build_report(config, probes, data_dir, output_dir="reports", mock=False):
         for probe in probes:
             body.append(_probe_card(probe, stats[probe["id"]], current, output_dir))
         (output_dir / (model_slug(model["id"]) + ".html")).write_text(_page_shell(model.get("label", model["id"]), "".join(body), mock, "index.html"), encoding="utf-8")
-    (output_dir / "live.html").write_text(_live_page(config, surgeon_probe), encoding="utf-8")
+    (output_dir / "live.html").write_text(_live_page(config, surgeon_probe, probes), encoding="utf-8")
     return output_dir / "index.html"
